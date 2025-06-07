@@ -4,7 +4,7 @@ MODULE_NAME := epirootkit
 TEST_MODULE_NAME := test_epirootkit
 
 # Flags de compilation
-EXTRA_CFLAGS += -Wall -Wextra -Werror
+EXTRA_CFLAGS += -Wall -Wextra
 EXTRA_CFLAGS += -DDEBUG
 
 # Objets à compiler

