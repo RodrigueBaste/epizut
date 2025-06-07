@@ -1,0 +1,10 @@
+{
+    "Helene": {
+        "password": "detroie",
+        "role": "admin"
+    },
+    "Hubert": {
+        "password": "commentestvotreblanquette?",
+        "role": "user"
+    }
+}

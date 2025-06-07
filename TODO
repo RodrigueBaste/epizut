@@ -1,0 +1,37 @@
+# TODO List - EpiRootkit Project
+
+## Fonctionnalités Obligatoires
+- [x] Compilation du module kernel
+- [x] Connexion persistante au serveur C2
+- [x] Persistance après redémarrage
+- [x] Exécution de commandes à distance
+
+## Fonctionnalités Optionnelles
+- [x] Protection par mot de passe
+- [x] Upload/Download de fichiers
+- [x] Masquage du module
+- [x] Masquage de fichiers/répertoires
+- [x] Chiffrement des communications
+- [x] Keylogger (bonus)
+
+## Documentation
+- [x] README.md
+- [x] AUTHORS
+- [x] TODO
+- [ ] Documentation technique détaillée
+  - [ ] Choix des versions (kernel, distro)
+  - [ ] Désactivations de sécurité
+  - [ ] Captures d'écran
+  - [ ] Explications techniques
+
+## Tests
+- [x] Tests unitaires
+- [ ] Tests d'intégration
+- [ ] Tests de performance
+- [ ] Tests de sécurité
+
+## Améliorations Futures
+- [ ] Interface graphique pour le programme d'attaque
+- [ ] Support de plusieurs connexions simultanées
+- [ ] Chiffrement plus robuste
+- [ ] Détection et contournement des mécanismes de sécurité 

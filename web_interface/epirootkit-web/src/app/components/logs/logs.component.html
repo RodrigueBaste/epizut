@@ -1,0 +1,54 @@
+<div class="logs-container">
+  <div class="card">
+    <div class="logs-header">
+      <h2>Logs système</h2>
+      <div class="logs-actions">
+        <input
+          type="text"
+          [(ngModel)]="filter"
+          placeholder="Filtrer les logs..."
+          class="filter-input"
+        >
+        <button class="btn btn-danger" (click)="clearLogs()">
+          Effacer les logs
+        </button>
+      </div>
+    </div>
+
+    <div class="stats-container" *ngIf="stats">
+      <div class="stat-box">
+        <h3>Total des logs</h3>
+        <p>{{ stats.totalLogs }}</p>
+      </div>
+      <div class="stat-box">
+        <h3>Taux d'erreurs</h3>
+        <p>{{ stats.errorRate }}%</p>
+      </div>
+      <div class="stat-box">
+        <h3>Dernière erreur</h3>
+        <p>{{ stats.lastError | date:'medium' }}</p>
+      </div>
+    </div>
+
+    <div class="logs-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Horodatage</th>
+            <th>Niveau</th>
+            <th>Source</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let log of getFilteredLogs()" [ngClass]="log.level.toLowerCase()">
+            <td>{{ log.timestamp | date:'medium' }}</td>
+            <td>{{ log.level }}</td>
+            <td>{{ log.source }}</td>
+            <td>{{ log.message }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div> 
