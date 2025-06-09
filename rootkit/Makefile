@@ -3,12 +3,18 @@ KERNEL_DIR := /lib/modules/$(shell uname -r)/build
 MODULE_NAME := epirootkit
 
 # Flags de compilation
-EXTRA_CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
-EXTRA_CFLAGS += -DDEBUG
-EXTRA_CFLAGS += -DCONFIG_DEBUG_SECTION_MISMATCH=y
-EXTRA_CFLAGS += -DCONFIG_X86_32=n
-EXTRA_CFLAGS += -DCONFIG_MODULE_UNLOAD=y
-EXTRA_CFLAGS += -DCONFIG_MODULE_FORCE_UNLOAD=y
+EXTRA_CFLAGS += -Wall
+EXTRA_CFLAGS += -Wno-pointer-to-int-cast
+EXTRA_CFLAGS += -Wno-int-to-pointer-cast
+EXTRA_CFLAGS += -Wno-unused-variable
+EXTRA_CFLAGS += -Wno-unused-function
+EXTRA_CFLAGS += -Wno-implicit-function-declaration
+EXTRA_CFLAGS += -fno-strict-aliasing
+EXTRA_CFLAGS += -DCONFIG_X86_32
+EXTRA_CFLAGS += -DCONFIG_PARAVIRT
+EXTRA_CFLAGS += -DCONFIG_PARAVIRT_SPINLOCKS
+EXTRA_CFLAGS += -DCONFIG_KVM_GUEST
+EXTRA_CFLAGS += -DCONFIG_RETPOLINE
 
 # Objets à compiler
 obj-m := $(MODULE_NAME).o
@@ -16,7 +22,7 @@ obj-m := $(MODULE_NAME).o
 # Règles principales
 all:
 	@echo "Compilation du module kernel..."
-	@make -C $(KERNEL_DIR) M=$(PWD) modules CONFIG_DEBUG_SECTION_MISMATCH=y
+	@$(MAKE) -C $(KERNEL_DIR) M=$(PWD) modules
 
 clean:
 	@echo "Nettoyage des fichiers de compilation..."
