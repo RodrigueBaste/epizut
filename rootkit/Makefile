@@ -10,10 +10,6 @@ EXTRA_CFLAGS += -DDEBUG
 # Objets à compiler
 obj-m := $(MODULE_NAME).o $(TEST_MODULE_NAME).o
 
-# Dépendances
-$(MODULE_NAME)-y := epirootkit.o
-$(TEST_MODULE_NAME)-y := test_epirootkit.o
-
 # Règles principales
 all: check_kernel check_headers
 	@echo "Compilation des modules kernel..."
