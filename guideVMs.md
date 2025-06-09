@@ -205,9 +205,3 @@ python3 attacking_program/client.py <IP_VICTIME>
    - Vérifier les logs de compilation
    - Vérifier la version de gcc : `gcc --version`
 
-## 9. Support
-
-Pour toute question ou problème, veuillez :
-1. Consulter la documentation du projet
-2. Vérifier les logs système
-3. Contacter l'équipe de support

