@@ -59,7 +59,7 @@ struct keylog_config keylog_config = {
 
 struct memory_manager mem_manager = {
     .nonpaged_memory = NULL,
-    .size = 0,
+    .nonpaged_size = 0,
     .lock = __SPIN_LOCK_UNLOCKED(mem_manager.lock)
 };
 
