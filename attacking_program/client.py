@@ -6,7 +6,7 @@ import time
 
 SERVER_IP = "192.168.15.5"
 PORT = 4242
-KEY = b"epirootkit"  # On utilise la même clé que côté rootkit
+KEY = b"epita"  # Même clé que côté rootkit
 
 def xor(data, key):
     return bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])

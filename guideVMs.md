@@ -10,6 +10,9 @@ Ce guide détaille la configuration des deux machines virtuelles nécessaires po
 5. [Configuration post-installation](#5-configuration-post-installation)
 6. [Vérification de la configuration](#6-vérification-de-la-configuration)
 7. [Sécurité et bonnes pratiques](#7-sécurité-et-bonnes-pratiques)
+8. [Dépannage](#8-dépannage)
+9. [Configuration des clés XOR et authentification](#9-configuration-des-clés-xor-et-authentification)
+10. [Utilisation du client d'attaque](#10-utilisation-du-client-d'attaque)
 
 ## 1. Configuration des VMs
 
@@ -204,4 +207,30 @@ python3 attacking_program/client.py <IP_VICTIME>
    - Vérifier les dépendances : `make clean && make`
    - Vérifier les logs de compilation
    - Vérifier la version de gcc : `gcc --version`
+
+## 9. Configuration des clés XOR et authentification
+
+Le rootkit et le client utilisent un chiffrement XOR pour sécuriser leurs communications. Il est important que les deux utilisent la même clé :
+
+1. Dans le rootkit (`rootkit/epirootkit.c`), la clé est définie comme :
+```c
+.xor_key = "epita"
+```
+
+2. Dans le client (`attacking_program/client.py`), la clé doit être la même :
+```python
+KEY = b"epita"
+```
+
+Le mot de passe par défaut pour l'authentification est également "epita".
+
+### Utilisation du client d'attaque
+Une fois le client lancé, vous pourrez :
+- Exécuter des commandes shell sur la machine victime
+- Télécharger des fichiers : `download remote_path local_path`
+- Uploader des fichiers : `upload local_path remote_path`
+- Changer le mot de passe : `passwd new_password`
+- Quitter : `exit` ou `quit`
+
+Le mot de passe par défaut est "epita".
 
