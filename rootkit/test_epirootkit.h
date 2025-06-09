@@ -13,6 +13,15 @@
 #include <net/sock.h>
 #include "epirootkit.h"
 
+// Shared variables
+extern struct socket *g_connection_socket;
+
+// External function declarations
+void xor_cipher(char *data, int length);
+void hide_line(const char *filename, unsigned long line);
+void unhide_line(const char *filename, unsigned long line);
+bool is_line_hidden(const char *filename, unsigned long line);
+
 // Test function declarations - all marked as static
 static int test_xor_cipher(void);
 static int test_hide_line(void);
@@ -23,16 +32,8 @@ static int test_connection(void);
 static int exec_and_send_output(const char *command);
 static int connect_to_server(void);
 
-// Shared variables
-extern struct socket *g_connection_socket;
+// Module init/exit - these must be non-static for module macros
+int __init test_init(void);
+void __exit test_exit(void);
 
-// Helper functions
-void hide_line(const char *filename, unsigned long line);
-void unhide_line(const char *filename, unsigned long line);
-bool is_line_hidden(const char *filename, unsigned long line);
-
-// Module init/exit
-int test_init(void);
-void test_exit(void);
-
-#endif // TEST_EPIROOTKIT_H 
+#endif /* TEST_EPIROOTKIT_H */ 

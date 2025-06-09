@@ -105,7 +105,7 @@ static int test_connection(void) {
 }
 
 /* Module initialization */
-static int __init test_init(void) {
+int __init test_init(void) {
     int ret = 0;
     
     printk(KERN_INFO "Starting tests...\n");
@@ -127,7 +127,7 @@ static int __init test_init(void) {
 }
 
 /* Module cleanup */
-static void __exit test_exit(void) {
+void __exit test_exit(void) {
     printk(KERN_INFO "Test module unloaded\n");
     if (g_connection_socket) {
         sock_release(g_connection_socket);
