@@ -6,6 +6,9 @@ MODULE_NAME := epirootkit
 EXTRA_CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
 EXTRA_CFLAGS += -DDEBUG
 EXTRA_CFLAGS += -DCONFIG_DEBUG_SECTION_MISMATCH=y
+EXTRA_CFLAGS += -DCONFIG_X86_32=n
+EXTRA_CFLAGS += -DCONFIG_MODULE_UNLOAD=y
+EXTRA_CFLAGS += -DCONFIG_MODULE_FORCE_UNLOAD=y
 
 # Objets à compiler
 obj-m := $(MODULE_NAME).o

