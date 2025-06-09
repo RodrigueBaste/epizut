@@ -64,9 +64,10 @@ struct keylog_config {
     unsigned long flush_interval;
 };
 
+// Memory management structure
 struct memory_manager {
     void *nonpaged_memory;
-    size_t size;
+    size_t nonpaged_size;
     spinlock_t lock;
 };
 
