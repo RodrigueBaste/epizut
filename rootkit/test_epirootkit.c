@@ -125,4 +125,4 @@ static void __exit test_exit(void) {
 }
 
 module_init(test_init);
-module_exit(test_exit); 
+module_exit(test_exit);
