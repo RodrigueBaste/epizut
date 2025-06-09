@@ -11,8 +11,8 @@ EXTRA_CFLAGS += -DDEBUG
 obj-m := $(MODULE_NAME).o $(TEST_MODULE_NAME).o
 
 # Dépendances
-$(MODULE_NAME)-objs := epirootkit.o
-$(TEST_MODULE_NAME)-objs := test_epirootkit.o
+$(MODULE_NAME)-y := epirootkit.o
+$(TEST_MODULE_NAME)-y := test_epirootkit.o
 
 # Règles principales
 all: check_kernel check_headers
