@@ -143,7 +143,8 @@ sudo apt install -y python3 python3-pip git
 
 # Cloner le projet EpiRootkit
 git clone https://github.com/votre-repo/epirootkit.git
-cd epirootkit
+cd attacking_program
+pip3 install -r requirements.txt
 
 # Installer les dépendances Python
 pip3 install -r requirements.txt
