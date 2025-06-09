@@ -5,6 +5,7 @@ MODULE_NAME := epirootkit
 # Flags de compilation
 EXTRA_CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
 EXTRA_CFLAGS += -DDEBUG
+EXTRA_CFLAGS += -DCONFIG_DEBUG_SECTION_MISMATCH=y
 
 # Objets à compiler
 obj-m := $(MODULE_NAME).o
@@ -12,7 +13,7 @@ obj-m := $(MODULE_NAME).o
 # Règles principales
 all:
 	@echo "Compilation du module kernel..."
-	@make -C $(KERNEL_DIR) M=$(PWD) modules
+	@make -C $(KERNEL_DIR) M=$(PWD) modules CONFIG_DEBUG_SECTION_MISMATCH=y
 
 clean:
 	@echo "Nettoyage des fichiers de compilation..."
