@@ -18,7 +18,7 @@ export class DashboardComponent implements OnInit {
   isKeyloggerRunning: boolean = false;
   redirectRules: RedirectRule[] = [];
   selectedFile: File | null = null;
-  files: string[] = []; // Liste des fichiers disponibles
+  files: string[] = [];
 
   constructor(private rootkitService: RootkitService) {}
 

@@ -23,12 +23,10 @@ export class AuthService {
     CURRENT_USER: 'currentUser'
   };
 
-  // Endpoints de l'API pour l'authentification
   private static readonly API_ENDPOINTS = {
     LOGIN: '/auth/login'
   };
 
-  // URL de base de l'API, à adapter selon notre configuration
   private readonly apiBaseUrl = 'http://localhost:3000/api';
   private readonly authStateSubject = new BehaviorSubject<AuthState>({
     isAuthenticated: false,
@@ -42,21 +40,18 @@ export class AuthService {
     this.initializeAuthState();
   }
 
-  // On expose les observables pour que les composants puissent s'abonner
   public get currentUser(): Observable<User | null> {
     return this.authStateSubject.pipe(
       map(state => state.user)
     );
   }
 
-  // On expose un observable pour savoir si l'utilisateur est authentifié
   public get isAuthenticated(): Observable<boolean> {
     return this.authStateSubject.pipe(
       map(state => state.isAuthenticated)
     );
   }
 
-  // On initialise l'état d'authentification en vérifiant le localStorage
   private initializeAuthState(): void {
     if (this.isLocalStorageAvailable()) {
       const storedUser = this.getStoredUser();
@@ -69,12 +64,10 @@ export class AuthService {
     }
   }
 
-  // Vérifie si le localStorage est disponible dans l'environnement actuel
   private isLocalStorageAvailable(): boolean {
     return typeof window !== 'undefined' && !!window.localStorage;
   }
 
-  // On récupère l'utilisateur stocké dans le localStorage
   private getStoredUser(): User | null {
     try {
       const storedUser = localStorage.getItem(AuthService.STORAGE_KEYS.CURRENT_USER);
@@ -85,8 +78,18 @@ export class AuthService {
   }
 
   login(username: string, password: string): Observable<boolean> {
-    // Utilise la vraie authentification côté serveur
-    return this.realLogin(username, password);
+    // TODO: Remplacer par la vraie authentification quand le serveur sera prêt
+    return this.mockLogin(username);
+  }
+
+  private mockLogin(username: string): Observable<boolean> {
+    const mockUser: User = {
+      username,
+      token: 'mock-jwt-token'
+    };
+
+    this.updateAuthState(mockUser);
+    return of(true);
   }
 
   private realLogin(username: string, password: string): Observable<boolean> {
@@ -134,4 +137,4 @@ export class AuthService {
       ? localStorage.getItem(AuthService.STORAGE_KEYS.AUTH_TOKEN)
       : null;
   }
-}
+} 

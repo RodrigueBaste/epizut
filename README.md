@@ -52,6 +52,8 @@ python3 server.py
 
 ## 5. Bonnes pratiques
 
+- Utiliser cet environnement uniquement à des fins pédagogiques, dans un réseau isolé.
+- Documenter toutes les actions réalisées.
 - Désactiver les protections (SELinux, Secure Boot, Kernel Lockdown) uniquement sur la VM victime.
 
 ## 6. Dépannage
@@ -203,6 +205,8 @@ Voici un récapitulatif rapide des commandes principales utilisables depuis la V
 
 Remarques :
 - Remplacez <IP_VICTIME> par l'adresse IP de la VM victime.
+- Les options exactes peuvent varier selon l'implémentation de client.py.
+- Pour des usages avancés, consultez le code source ou la documentation technique.
 
 ---
 

@@ -22,7 +22,6 @@ export class LoginComponent implements OnInit {
   ) {}
 
   ngOnInit() {
-    // Si l'utilisateur est déjà connecté, rediriger vers le tableau de bord
     if (this.authService.isAuthenticated) {
       this.router.navigate(['/dashboard']);
     }

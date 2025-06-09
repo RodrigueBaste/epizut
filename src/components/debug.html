@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link
+            rel="stylesheet"
+            type="text/css"
+            media="screen"
+            href="index.css"
+        />
+    </head>
+
+    <body>
+        <div class="container">
+            <h1>OIDC Debug Tools</h1>
+
+            <h3>Token</h3>
+            <p id="token" class="token-text">{{ token }}</p>
+            <h3>Refresh Token</h3>
+            <p id="refresh_token" class="token-text">{{ refresh_token }}</p>
+
+            <h2>Token Management</h2>
+            <button id="deleteTokenBtn">Delete token</button>
+            <button id="deleteRefreshTokenBtn">Delete refresh token</button>
+
+            <h2>API Tests</h2>
+            <button id="errorBtn">Generate an error response</button>
+            <button id="expiredTokenBtn">
+                Generate an expired token response
+            </button>
+            <button id="testApiRequestBtn">Test API Request with Retry</button>
+            <button id="testRefreshFlowBtn">Test Token Refresh Flow</button>
+
+            <h2><a href="/">Return to main application</a></h2>
+        </div>
+    </body>
+</html>

@@ -46,7 +46,7 @@ VBoxManage modifyvm "EpiRootkit-Victim" --memory 2048 --cpus 2
 VBoxManage createhd --filename "EpiRootkit-Victim.vdi" --size 20480
 VBoxManage storagectl "EpiRootkit-Victim" --name "SATA Controller" --add sata --controller IntelAhci
 VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium "EpiRootkit-Victim.vdi"
-VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "./ubuntu-22.04.3-desktop-amd64.iso"
+VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "ubuntu-22.04.3-desktop-amd64.iso"
 ```
 
 3. Lancer la VM et suivre l'assistant d'installation graphique :
@@ -58,81 +58,16 @@ VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --po
    - Attendre la fin de l'installation
    - Redémarrer la VM
 
-4. Après l'installation, vérifier et configurer la version du kernel :
-```bash
-# Vérifier la version actuelle du kernel
-uname -r
-
-# Si la version n'est pas 5.15.0, installer le kernel spécifique
-sudo apt update
-sudo add-apt-repository universe
-sudo add-apt-repository multiverse
-sudo apt update
-sudo apt install --install-recommends linux-generic-hwe-22.04
-
-# Mettre à jour GRUB
-sudo update-grub
-
-# Redémarrer la VM
-sudo reboot
-
-# Après le redémarrage, vérifier la version du kernel
-uname -r  # Doit afficher 5.15.0-XX-generic
-```
-
-5. Désactiver les mises à jour automatiques pour éviter les mises à jour non désirées du kernel :
-```bash
-# Désactiver les mises à jour automatiques
-sudo systemctl disable apt-daily.service
-sudo systemctl disable apt-daily.timer
-sudo systemctl disable apt-daily-upgrade.service
-sudo systemctl disable apt-daily-upgrade.timer
-
-# Vérifier que les services sont bien désactivés
-systemctl status apt-daily.service
-systemctl status apt-daily.timer
-systemctl status apt-daily-upgrade.service
-systemctl status apt-daily-upgrade.timer
-```
-
-6. Configurer le système pour maintenir la version du kernel :
-```bash
-# Empêcher la mise à jour du kernel
-sudo apt-mark hold linux-image-generic linux-headers-generic
-
-# Vérifier que le kernel est bien en "hold"
-apt-mark showhold
-```
-
-7. Vérifier que tout est correctement configuré :
-```bash
-# Vérifier la version du kernel
-uname -r
-
-# Vérifier les modules kernel installés
-ls /lib/modules/
-
-# Vérifier que les headers sont présents
-ls /usr/src/linux-headers-5.15.0-*
-```
-
-Ces étapes garantissent que :
-- Ubuntu 22.04 LTS est installé
-- Le kernel 5.15.0 est installé et configuré
-- Les mises à jour automatiques sont désactivées
-- Le kernel ne sera pas mis à jour automatiquement
-- Tous les composants nécessaires pour le développement du rootkit sont présents
-
 ## 3. Installation de la VM Attaquant
 
 1. Créer la VM avec VirtualBox :
 ```bash
 VBoxManage createvm --name "EpiRootkit-Attacker" --ostype Ubuntu_64 --register
-VBoxManage modifyvm "EpiRootkit-Attacker" --cpus 2 --memory 2048 --vram 64
+VBoxManage modifyvm "EpiRootkit-Attacker" --memory 1024 --cpus 1
 VBoxManage createhd --filename "EpiRootkit-Attacker.vdi" --size 20480
 VBoxManage storagectl "EpiRootkit-Attacker" --name "SATA Controller" --add sata --controller IntelAhci
 VBoxManage storageattach "EpiRootkit-Attacker" --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium "EpiRootkit-Attacker.vdi"
-VBoxManage storageattach "EpiRootkit-Attacker" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "/Users/rodriguebaste/Downloads/ubuntu-22.04.3-desktop-amd64.iso"
+VBoxManage storageattach "EpiRootkit-Attacker" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "ubuntu-22.04.3-desktop-amd64.iso"
 ```
 
 2. Lancer la VM et suivre l'assistant d'installation graphique :
@@ -166,7 +101,7 @@ VBoxManage modifyvm "EpiRootkit-Attacker" --nic1 natnetwork --nat-network1 "EpiR
 # Mettre à jour le système
 sudo apt update && sudo apt upgrade -y
 
-# Configurer le nom d'hôte
+# Configurer le nom du serveur
 sudo hostnamectl set-hostname epirootkit-victim
 echo "127.0.1.1 epirootkit-victim" | sudo tee -a /etc/hosts
 

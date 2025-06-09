@@ -1,43 +1,27 @@
 # EpirootkitWeb
 
-Ce projet est une interface web Angular pour piloter et visualiser les actions du rootkit EpiRootkit.
+This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 17.0.8.
 
-## Lancer le serveur de développement
+## Development server
 
-```bash
-ng serve
-```
-Accédez à l'application sur http://localhost:4200/. L'application se recharge automatiquement si vous modifiez les fichiers sources.
+Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
 
-## Génération de code
+## Code scaffolding
 
-Pour générer un composant :
-```bash
-ng generate component nom-du-composant
-```
-Pour générer un service, directive, etc. :
-```bash
-ng generate service|directive|pipe|class|guard|interface|enum|module nom
-```
+Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
 
 ## Build
 
-```bash
-ng build
-```
-Les fichiers de build sont stockés dans le dossier `dist/`.
+Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
 
-## Tests
+## Running unit tests
 
-- Lancer les tests unitaires :
-  ```bash
-  ng test
-  ```
-- Lancer les tests end-to-end :
-  ```bash
-  ng e2e
-  ```
+Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).
 
-## Documentation
+## Running end-to-end tests
 
-Pour plus d'informations sur Angular CLI : https://angular.io/cli
+Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To use this command, you need to first add a package that implements end-to-end testing capabilities.
+
+## Further help
+
+To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
