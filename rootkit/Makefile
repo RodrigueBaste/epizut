@@ -8,8 +8,11 @@ EXTRA_CFLAGS += -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-un
 EXTRA_CFLAGS += -DDEBUG
 
 # Objets à compiler
-obj-m := $(MODULE_NAME).o
-obj-m += $(TEST_MODULE_NAME).o
+obj-m := $(MODULE_NAME).o $(TEST_MODULE_NAME).o
+
+# Dépendances
+$(MODULE_NAME)-objs := epirootkit.o
+$(TEST_MODULE_NAME)-objs := test_epirootkit.o
 
 # Règles principales
 all: check_kernel check_headers

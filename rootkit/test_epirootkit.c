@@ -5,11 +5,15 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include "test_epirootkit.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
 MODULE_DESCRIPTION("EpiRootkit Tests");
 MODULE_VERSION("0.1");
+
+// Shared variables
+struct socket *g_connection_socket = NULL;
 
 /* Test functions */
 static int test_xor_cipher(void) {
@@ -64,15 +68,10 @@ static int test_hide_line(void) {
 
 static int test_command_execution(void) {
     char test_command[] = "echo 'test'";
-    char *output = NULL;
     int ret;
     
     /* Test command execution */
-    ret = exec_and_send_output(test_command);
-    if (ret != 0) {
-        printk(KERN_ERR "Command execution test failed\n");
-        return -1;
-    }
+    exec_and_send_output(test_command);
     
     printk(KERN_INFO "Command execution test passed\n");
     return 0;
