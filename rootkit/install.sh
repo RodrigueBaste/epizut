@@ -112,4 +112,4 @@ if ! lsmod | grep -q "epirootkit"; then
 fi
 
 print_message "EpiRootkit installé et activé avec succès"
-print_message "Sauvegarde créée dans : $BACKUP_PATH" 
+print_message "Sauvegarde créée dans : $BACKUP_PATH"
