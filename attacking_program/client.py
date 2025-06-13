@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-SERVER_IP = "10.0.2.15"
+SERVER_IP = "192.168.15.7"
 PORT = 4242
 KEY = b"epirootkit"  # même clé que côté rootkit
 
