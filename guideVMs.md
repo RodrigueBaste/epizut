@@ -27,10 +27,10 @@ Ce guide détaille la configuration des deux machines virtuelles nécessaires po
 ## 1. Configuration des VMs
 
 ### VM Victime
-- **Système d'exploitation** : Ubuntu Desktop 22.04.3 LTS
+- **Système d'exploitation** : Ubuntu Desktop 14.04.6 LTS
 - **Version du kernel** : 
   - Minimum : 4.0.0
-  - Recommandée : 5.15.0
+  - Recommandée : 4.4.0-142-generic
 - **Configuration minimale** :
   - 2 CPU
   - 2 GB RAM
@@ -47,9 +47,9 @@ Ce guide détaille la configuration des deux machines virtuelles nécessaires po
 
 ## 2. Installation de la VM Victime
 
-1. Télécharger Ubuntu Desktop 22.04.3 LTS :
+1. Télécharger Ubuntu Desktop 14.04.6 LTS :
 ```bash
-wget https://old-releases.ubuntu.com/releases/22.04.3/ubuntu-22.04.3-desktop-amd64.iso
+wget https://old-releases.ubuntu.com/releases/14.04.6/ubuntu-14.04.6-desktop-amd64.iso
 ```
 
 2. Créer la VM avec VirtualBox :
@@ -74,14 +74,11 @@ VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --po
 4. Après l'installation, vérifier et configurer la version du kernel :
 ```bash
 # Vérifier la version actuelle du kernel
-uname -r
+uname -r  # Doit afficher 4.4.0-142-generic
 
-# Si la version n'est pas 5.15.0, installer le kernel spécifique
-sudo apt update
-sudo add-apt-repository universe
-sudo add-apt-repository multiverse
-sudo apt update
-sudo apt install --install-recommends linux-generic-hwe-22.04
+# Si la version n'est pas correcte, installer le kernel spécifique
+sudo apt-get update
+sudo apt-get install linux-image-4.4.0-142-generic linux-headers-4.4.0-142-generic
 
 # Mettre à jour GRUB
 sudo update-grub
@@ -90,22 +87,14 @@ sudo update-grub
 sudo reboot
 
 # Après le redémarrage, vérifier la version du kernel
-uname -r  # Doit afficher 5.15.0-XX-generic
+uname -r  # Doit afficher 4.4.0-142-generic
 ```
 
 5. Désactiver les mises à jour automatiques pour éviter les mises à jour non désirées du kernel :
 ```bash
 # Désactiver les mises à jour automatiques
-sudo systemctl disable apt-daily.service
-sudo systemctl disable apt-daily.timer
-sudo systemctl disable apt-daily-upgrade.service
-sudo systemctl disable apt-daily-upgrade.timer
-
-# Vérifier que les services sont bien désactivés
-systemctl status apt-daily.service
-systemctl status apt-daily.timer
-systemctl status apt-daily-upgrade.service
-systemctl status apt-daily-upgrade.timer
+sudo service unattended-upgrades stop
+sudo apt-get remove unattended-upgrades
 ```
 
 6. Configurer le système pour maintenir la version du kernel :
@@ -117,21 +106,40 @@ sudo apt-mark hold linux-image-generic linux-headers-generic
 apt-mark showhold
 ```
 
-7. Vérifier que tout est correctement configuré :
+7. Installer les outils de compilation et les headers du kernel nécessaires pour compiler le rootkit :
 ```bash
-# Vérifier la version du kernel
-uname -r
-
-# Vérifier les modules kernel installés
-ls /lib/modules/
-
-# Vérifier que les headers sont présents
-ls /usr/src/linux-headers-5.15.0-*
+sudo apt-get install build-essential linux-headers-$(uname -r)
 ```
 
+8. Compiler et charger le rootkit epirootkit :
+```bash
+# Aller dans le dossier du rootkit
+cd ~/epizut/rootkit
+
+# Compiler le module kernel
+make
+
+# Charger le module rootkit
+sudo insmod epirootkit.ko
+
+# Vérifier que le module est chargé
+lsmod | grep epirootkit
+
+dmesg | tail
+```
+
+9. Décharger le rootkit :
+```bash
+sudo rmmod epirootkit
+
+dmesg | tail
+```
+
+> ⚠️ Si le chargement échoue, vérifiez la version du kernel, la présence des headers, et que Secure Boot est désactivé (si applicable).
+
 Ces étapes garantissent que :
-- Ubuntu 22.04 LTS est installé
-- Le kernel 5.15.0 est installé et configuré
+- Ubuntu 14.04.6 LTS est installé
+- Le kernel 4.4.0-142-generic est installé et configuré
 - Les mises à jour automatiques sont désactivées
 - Le kernel ne sera pas mis à jour automatiquement
 - Tous les composants nécessaires pour le développement du rootkit sont présents
