@@ -3,13 +3,26 @@
 Ce guide détaille la configuration des deux machines virtuelles nécessaires pour le projet EpiRootkit : une VM victime et une VM attaquant.
 
 ## Table des matières
-1. [Configuration des VMs](#1-configuration-des-vms)
-2. [Installation de la VM Victime](#2-installation-de-la-vm-victime)
-3. [Installation de la VM Attaquant](#3-installation-de-la-vm-attaquant)
-4. [Configuration réseau](#4-configuration-réseau)
-5. [Configuration post-installation](#5-configuration-post-installation)
-6. [Vérification de la configuration](#6-vérification-de-la-configuration)
-7. [Sécurité et bonnes pratiques](#7-sécurité-et-bonnes-pratiques)
+- [Guide de Configuration des VMs pour EpiRootkit](#guide-de-configuration-des-vms-pour-epirootkit)
+  - [Table des matières](#table-des-matières)
+  - [1. Configuration des VMs](#1-configuration-des-vms)
+    - [VM Victime](#vm-victime)
+    - [VM Attaquant](#vm-attaquant)
+  - [2. Installation de la VM Victime](#2-installation-de-la-vm-victime)
+  - [3. Installation de la VM Attaquant](#3-installation-de-la-vm-attaquant)
+  - [4. Configuration réseau](#4-configuration-réseau)
+  - [5. Configuration post-installation](#5-configuration-post-installation)
+    - [VM Victime](#vm-victime-1)
+    - [VM Attaquant](#vm-attaquant-1)
+  - [6. Vérification de la configuration](#6-vérification-de-la-configuration)
+    - [Sur la VM Victime](#sur-la-vm-victime)
+    - [Sur la VM Attaquant](#sur-la-vm-attaquant)
+  - [7. Sécurité et bonnes pratiques](#7-sécurité-et-bonnes-pratiques)
+    - [Sécurité](#sécurité)
+    - [Bonnes pratiques](#bonnes-pratiques)
+  - [8. Dépannage](#8-dépannage)
+    - [Problèmes courants](#problèmes-courants)
+  - [9. Support](#9-support)
 
 ## 1. Configuration des VMs
 
@@ -46,7 +59,7 @@ VBoxManage modifyvm "EpiRootkit-Victim" --memory 2048 --cpus 2
 VBoxManage createhd --filename "EpiRootkit-Victim.vdi" --size 20480
 VBoxManage storagectl "EpiRootkit-Victim" --name "SATA Controller" --add sata --controller IntelAhci
 VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium "EpiRootkit-Victim.vdi"
-VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "./ubuntu-22.04.3-desktop-amd64.iso"
+VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "./ubuntu-14.04.6-desktop-amd64.iso"
 ```
 
 3. Lancer la VM et suivre l'assistant d'installation graphique :
