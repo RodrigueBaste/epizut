@@ -4,9 +4,9 @@ import os
 import sys
 import time
 
-SERVER_IP = "192.168.15.7"
+SERVER_IP = "192.168.15.6"
 PORT = 4242
-KEY = b"epirootkit"  # même clé que côté rootkit
+KEY = b"epirootkit"
 
 def xor(data, key):
     return bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])
