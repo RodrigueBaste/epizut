@@ -223,6 +223,7 @@ static int establish_connection(void) {
         net_manager.connection = NULL;
     } else {
         net_manager.is_connected = true;
+        g_connection_socket = net_manager.connection; // note a moi meme: Pour eviter le pointeur null et corriger le crash systeme
     }
     
     spin_unlock_irqrestore(&net_manager.lock, flags);
