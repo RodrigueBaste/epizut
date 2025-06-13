@@ -82,7 +82,7 @@ def change_password(sock, new_password):
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(5)  # 5 secondes de timeout
+        s.settimeout(10)  # 5 secondes de timeout
 
         try:
             s.connect((SERVER_IP, PORT))
