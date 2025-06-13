@@ -49,7 +49,7 @@ VBoxManage modifyvm "EpiRootkit-Victim" --memory 2048 --cpus 2
 VBoxManage createhd --filename "EpiRootkit-Victim.vdi" --size 20480
 VBoxManage storagectl "EpiRootkit-Victim" --name "SATA Controller" --add sata --controller IntelAhci
 VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium "EpiRootkit-Victim.vdi"
-VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "ubuntu-22.04.3-desktop-amd64.iso"
+VBoxManage storageattach "EpiRootkit-Victim" --storagectl "SATA Controller" --port 1 --device 0 --type dvddrive --medium "ubuntu-14.04.6-desktop-amd64.iso"
 ```
 
 3. Lancer la VM et suivre l'assistant d'installation graphique :
