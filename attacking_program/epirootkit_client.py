@@ -19,7 +19,7 @@ class EpiRootkitClient:
         self.server_socket = None
         self.client_socket = None
         self.is_running = False
-        self.password = "epita2025"
+        self.password = "epita"
         
         # Clé de chiffrement (doit correspondre à celle du rootkit)
         self.encryption_key = bytes([
