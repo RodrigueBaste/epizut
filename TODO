@@ -3,7 +3,7 @@
 ## Fonctionnalités Obligatoires
 - [x] Compilation du module kernel
 - [x] Connexion persistante au serveur C2
-- [x] Persistance après redémarrage
+- [] Persistance après redémarrage
 - [x] Exécution de commandes à distance
 
 ## Fonctionnalités Optionnelles
@@ -34,4 +34,4 @@
 - [ ] Interface graphique pour le programme d'attaque
 - [ ] Support de plusieurs connexions simultanées
 - [ ] Chiffrement plus robuste
-- [ ] Détection et contournement des mécanismes de sécurité 
+- [ ] Détection et contournement des mécanismes de sécurité
