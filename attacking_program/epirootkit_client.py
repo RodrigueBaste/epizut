@@ -1,5 +1,4 @@
 import socket
-import threading
 
 KEY = b"epirootkit"
 HOST = "0.0.0.0"
@@ -30,7 +29,7 @@ def handle_client(client):
             print("---------------\n")
 
     except KeyboardInterrupt:
-        print("Exiting client.")
+        print("\nExiting client.")
     finally:
         client.close()
 
