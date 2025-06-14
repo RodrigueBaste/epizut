@@ -11,28 +11,31 @@ PORT = 4242
 def debug_hexdump(prefix, data):
     if DEBUG:
         hex_dump = ' '.join(f'{b:02x}' for b in data)
-        print(f"[DEBUG] {prefix} Hex dump: {hex_dump}")
-        try:
-            print(f"[DEBUG] {prefix} ASCII: {data.decode('ascii', errors='replace')}")
-        except:
-            pass
+        ascii_dump = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in data)
+        print(f"[DEBUG] {prefix}:")
+        print(f"[DEBUG] Hex:   {hex_dump}")
+        print(f"[DEBUG] ASCII: {ascii_dump}")
 
 def xor_encrypt(data: bytes) -> bytes:
     """
-    Implements the same XOR encryption as the kernel module:
-    encrypted[i] = msg[i] ^ config.xor_key[i % strlen(config.xor_key)]
+    Implements XOR encryption using the key.
+    Each byte of input is XORed with the corresponding byte of the key (cycling if needed).
     """
     key_bytes = KEY.encode('ascii')
     key_len = len(key_bytes)
     result = bytearray()
 
-    debug_hexdump("Original", data)
+    # Debug the input
+    debug_hexdump("Input data", data)
+    debug_hexdump("Key", key_bytes)
 
+    # Perform XOR encryption/decryption
     for i in range(len(data)):
-        enc_byte = data[i] ^ key_bytes[i % key_len]
-        result.append(enc_byte)
+        key_byte = key_bytes[i % key_len]
+        result.append(data[i] ^ key_byte)
 
-    debug_hexdump("Encrypted", result)
+    # Debug the output
+    debug_hexdump("Output data", result)
     return bytes(result)
 
 def receive_until_eof(client, timeout=5):

