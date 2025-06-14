@@ -11,7 +11,7 @@ def xor(data: bytes) -> bytes:
 
 def handle_client(client):
     try:
-        client.sendall(b"epirookit\n")
+        client.sendall(b"epirootkit\n")
 
         auth_response = client.recv(2048)
         print("--- AUTH ---")

