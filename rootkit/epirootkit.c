@@ -77,7 +77,7 @@ static int command_loop(void *data) {
             char *argv[] = { "/bin/sh", "-c", cmd, NULL };
             char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
 
-            info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL);
+            info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL, NULL, NULL, NULL);
             if (info)
                 call_usermodehelper_exec(info, UMH_WAIT_PROC);
 
