@@ -9,12 +9,15 @@ PORT = 4242
 
 def xor(data: bytes) -> bytes:
     """
-    Implements the same XOR logic as the rootkit:
-    decrypted[i] = buffer[i] ^ config.xor_key[i % strlen(config.xor_key)]
+    Implements XOR encryption/decryption using the key.
+    Each byte of input is XORed with the corresponding byte of the key (cycling if needed).
     """
     result = bytearray()
-    for i, b in enumerate(data):
-        result.append(b ^ ord(KEY[i % len(KEY)]))
+    key_bytes = KEY.encode('ascii')
+    key_len = len(key_bytes)
+
+    for i, byte in enumerate(data):
+        result.append(byte ^ key_bytes[i % key_len])
     return bytes(result)
 
 def debug_print(msg: str, data: bytes = None):
