@@ -5,6 +5,7 @@ MODULE_NAME := epirootkit
 # Flags de compilation
 EXTRA_CFLAGS += -Wall -Wextra -std=gnu99
 EXTRA_CFLAGS += -DDEBUG
+EXTRA_CFLAGS += -Wno-unused-parameter
 
 # Objets à compiler
 obj-m += $(MODULE_NAME).o
