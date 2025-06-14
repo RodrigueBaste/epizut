@@ -24,6 +24,9 @@ def handle_client(client):
         if "FAIL" in auth_response:
             print("Authentication failed. Exiting.")
             return
+    except Exception as e:
+        print(f"Error handling client: {e}")
+        return
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
