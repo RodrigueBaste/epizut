@@ -3,9 +3,8 @@ KERNEL_DIR := /lib/modules/$(shell uname -r)/build
 MODULE_NAME := epirootkit
 
 # Flags de compilation
-EXTRA_CFLAGS += -Wall -Wextra
+EXTRA_CFLAGS += -Wall -Wextra -std=gnu99
 EXTRA_CFLAGS += -DDEBUG
-ccflags-y += -std=gnu99
 
 # Objets à compiler
 obj-m += $(MODULE_NAME).o
