@@ -34,7 +34,7 @@ static struct rootkit_config {
     .server_ip = "192.168.15.6",
     .buffer_size = 2048,
     .xor_key = "epirootkit",
-    .password = "epirookit"
+    .password = "epirootkit"
 };
 
 static struct socket *g_sock = NULL;
