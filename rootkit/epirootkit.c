@@ -135,9 +135,11 @@ static int command_loop(void *data) {
             continue;
         }
 
-        if (strncmp(buffer, "cd ", 3) == 0) {
-            const char *path = buffer + 3;
-            if (strlen(path) > 0 && strlen(path) < sizeof(working_directory)) {
+        if (strncmp(buffer, "cd", 2) == 0) {
+            const char *path = buffer + 2;
+            while (*path == ' ')
+                path++;
+            if (*path && strlen(path) < sizeof(working_directory)) {
                 strncpy(working_directory, path, sizeof(working_directory) - 1);
                 working_directory[sizeof(working_directory) - 1] = '\0';
             }
