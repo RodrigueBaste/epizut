@@ -11,13 +11,11 @@ def xor(data: bytes) -> bytes:
 
 def handle_client(client):
     try:
-        # Envoyer le mot de passe en clair à la connexion
         client.sendall(b"epirookit\n")
 
-        # Afficher la réponse AUTH OK / FAIL
         auth_response = client.recv(2048)
         print("--- AUTH ---")
-        print(auth_response.decode(errors="ignore"))
+        print(auth_response.decode(errors="ignore").strip())
         print("------------\n")
 
         if b"FAIL" in auth_response:
@@ -33,20 +31,21 @@ def handle_client(client):
             client.sendall(encrypted)
 
             print("\n--- Response ---")
-            response_chunks = []
+            buffer = ""
 
             while True:
                 chunk = client.recv(2048)
                 if not chunk:
                     print("Connection closed by kernel module.")
                     return
+
                 decrypted = xor(chunk).decode(errors="ignore")
                 if "--EOF--" in decrypted:
-                    response_chunks.append(decrypted.replace("--EOF--", ""))
+                    buffer += decrypted.replace("--EOF--", "")
                     break
-                response_chunks.append(decrypted)
+                buffer += decrypted
 
-            print("".join(response_chunks))
+            print(buffer.strip())
             print("---------------\n")
 
     except KeyboardInterrupt:
