@@ -92,6 +92,7 @@ static int execute_and_stream_output(const char *cmd) {
     loff_t pos = 0;
     char buf[256];
 
+    pos = 0;
     f = filp_open(tmp_stdout, O_RDONLY, 0);
     if (!IS_ERR(f)) {
         while (1) {
